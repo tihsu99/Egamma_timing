@@ -1,0 +1,24 @@
+<use name="DataFormats/BeamSpot"/>
+<use name="PhysicsTools/IsolationAlgos"/>
+<use name="DataFormats/CaloTowers"/>
+<use name="DataFormats/RecoCandidate"/>
+<use name="DataFormats/EgammaCandidates"/>
+<use name="DataFormats/TrackReco"/>
+<use name="DataFormats/VertexReco"/>
+<use name="FWCore/Framework"/>
+<use name="FWCore/MessageLogger"/>
+<use name="FWCore/ParameterSet"/>
+<use name="Geometry/CaloGeometry"/>
+<use name="Geometry/Records"/>
+<use name="RecoCaloTools/Selectors" source_only="1"/>
+<use name="CommonTools/Statistics"/>
+<use name="RecoEgamma/EgammaIsolationAlgos"/>
+<use name="RecoLocalCalo/EcalRecAlgos"/>
+<use name="DataFormats/ParticleFlowCandidate"/>
+<use name="DataFormats/PatCandidates"/>
+<export>
+</export>
+<library file="*.cc" name="RecoEgammaEgammaIsolationAlgosPlugins">
+  <flags EDM_PLUGIN="1"/>
+</library>
+
