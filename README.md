@@ -14,7 +14,7 @@ cmsRun testElectronMVA_cfg_mod1.py electronLabel=ecalDrivenGsfElectronsHGC input
 ```
 And to submit it to condor (please remember to do `voms` first)
 ```
-`mkdir -p $HOME/tmp
+mkdir -p $HOME/tmp
 export X509_USER_PROXY=$HOME/tmp/x509up
 python submit_condor.py --outdir [YOUR/OUTPUT/DIRECTORY]
 ```
