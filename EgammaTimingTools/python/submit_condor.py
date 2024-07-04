@@ -37,7 +37,10 @@ def wrapper_condor(dataset_name, dataset_path, condor, outdir, farm_dir, barrel=
         if fout_root.IsZombie():
           print("{} is Zombie.".format(fout))
         h = fout_root.Get("ntuplizer/tree")
-        a = h.eta
+        if particle == 'electron':
+          a = h.ele_pt
+        else:
+          a = h.eta
     #    print(h)
         fout_root.Close()
         continue
@@ -106,6 +109,10 @@ if __name__ == '__main__':
     wrapper_condor('TT', 'root://se01.grid.nchc.org.tw//cms/store/user/tihsu/ele_reRECO/2024-01-19/TT_TuneCP5_14TeV-powheg-pythia8/crab_TT/240121_162232/0000', condor, os.path.join(args.outdir, 'endcap'), farm_dir, barrel=False, check=args.check)
     wrapper_condor('DY', "root://se01.grid.nchc.org.tw//cms/store/user/tihsu/ele_reRECO/2024-01-19/DYToLL_M-50_TuneCP5_14TeV-pythia8/crab_DY/240120_114733/0000", condor, os.path.join(args.outdir, 'barrel'), farm_dir, barrel=True, check=args.check)
     wrapper_condor('TT', 'root://se01.grid.nchc.org.tw//cms/store/user/tihsu/ele_reRECO/2024-01-19/TT_TuneCP5_14TeV-powheg-pythia8/crab_TT/240121_162232/0000', condor, os.path.join(args.outdir, 'barrel'), farm_dir, barrel=True, check=args.check)
+    wrapper_condor('DY_noPU', "root://se01.grid.nchc.org.tw//cms/store/user/tihsu/ele_reRECO/2024-01-19/DYToLL_M-50_TuneCP5_14TeV-pythia8/crab_DY_noPU/240426_115232/0000", condor, os.path.join(args.outdir, 'endcap'), farm_dir, barrel=False, check=args.check)
+    wrapper_condor('TT_noPU', 'root://se01.grid.nchc.org.tw//cms/store/user/tihsu/ele_reRECO/2024-01-19/TT_TuneCP5_14TeV-powheg-pythia8/crab_TT_noPU/240426_115307/0000', condor, os.path.join(args.outdir, 'endcap'), farm_dir, barrel=False, check=args.check)
+    wrapper_condor('DY_noPU', "root://se01.grid.nchc.org.tw//cms/store/user/tihsu/ele_reRECO/2024-01-19/DYToLL_M-50_TuneCP5_14TeV-pythia8/crab_DY_noPU/240426_115232/0000", condor, os.path.join(args.outdir, 'barrel'), farm_dir, barrel=True, check=args.check)
+    wrapper_condor('TT_noPU', 'root://se01.grid.nchc.org.tw//cms/store/user/tihsu/ele_reRECO/2024-01-19/TT_TuneCP5_14TeV-powheg-pythia8/crab_TT_noPU/240426_115307/0000', condor, os.path.join(args.outdir, 'barrel'), farm_dir, barrel=True, check=args.check)
   else:
     wrapper_condor('SinglePhoton2To200', 'root://se01.grid.nchc.org.tw//cms/store/user/tihsu/ele_reRECO/2024-01-19/SinglePhoton_Pt-2To200-gun/crab_SinglePhoton2to200/240303_225556/0000', condor, os.path.join(args.outdir, 'endcap'), farm_dir, barrel=False, check=args.check, particle=args.particle)
     wrapper_condor('SinglePhoton200To500', 'root://se01.grid.nchc.org.tw//cms/store/user/tihsu/ele_reRECO/2024-01-19/SinglePhoton_Pt200To500-gun/crab_SinglePhoton200to500/240303_222110/0000', condor, os.path.join(args.outdir, 'endcap'), farm_dir, barrel = False, check=args.check, particle=args.particle)

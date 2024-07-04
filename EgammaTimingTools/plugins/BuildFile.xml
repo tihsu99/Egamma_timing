@@ -16,6 +16,8 @@
 <use name="RecoLocalCalo/EcalRecAlgos"/>
 <use name="DataFormats/ParticleFlowCandidate"/>
 <use name="DataFormats/PatCandidates"/>
+<use name="CommonTools/UtilAlgos"/>
+<use name="FWCore/ServiceRegistry"/>
 <export>
 </export>
 <library file="*.cc" name="RecoEgammaEgammaIsolationAlgosPlugins">
