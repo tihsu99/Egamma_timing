@@ -79,6 +79,7 @@ private:
   std::vector<double> Trackster_dr_;
   std::vector<double> Trackster_Time_;
   std::vector<double> Trackster_TimeErr_;
+  std::vector<int>    Trackster_TrackIdx_;
 
   // Tokens
   const edm::EDGetTokenT<reco::GsfElectronCollection> electronProducer_;
@@ -168,6 +169,7 @@ TrackerNtuplizer::TrackerNtuplizer(const edm::ParameterSet& config)
   tree_->Branch("Trackster_phi", &Trackster_phi_);
   tree_->Branch("Trackster_Time", &Trackster_Time_);
   tree_->Branch("Trackster_TimeErr", &Trackster_TimeErr_);
+  tree_->Branch("Trackster_TrackIdx", &Trackster_TrackIdx_);
 }
 
 void TrackerNtuplizer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup){
@@ -342,6 +344,7 @@ void TrackerNtuplizer::analyze(const edm::Event& iEvent, const edm::EventSetup& 
     Trackster_dr_.clear();
     Trackster_Time_.clear();
     Trackster_TimeErr_.clear();
+    Trackster_TrackIdx_.clear();
 
     for (const auto& tst: tracksters){
       if (tst.vertices().empty()) continue;
@@ -356,6 +359,7 @@ void TrackerNtuplizer::analyze(const edm::Event& iEvent, const edm::EventSetup& 
       Trackster_dr_.push_back(dr);
       Trackster_Time_.push_back(tst.time());
       Trackster_TimeErr_.push_back(tst.timeError());
+      Trackster_TrackIdx_.push_back(tst.trackIdx());
     }
 
     tree_->Fill();
