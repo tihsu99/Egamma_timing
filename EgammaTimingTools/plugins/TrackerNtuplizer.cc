@@ -53,6 +53,7 @@ private:
   int nLumi_;
   int getNpu_;
   int vtxN_;
+  int sigTrkIdx_;
   double sigTrkTime_;
   double sigTrkTimeErr_;
   double sigTrkMtdMva_;
@@ -80,6 +81,9 @@ private:
   std::vector<double> Trackster_Time_;
   std::vector<double> Trackster_TimeErr_;
   std::vector<int>    Trackster_TrackIdx_;
+  std::vector<double> Trackster_Trackpt_;
+  std::vector<double> Trackster_Tracketa_;
+  std::vector<double> Trackster_Trackphi_;
 
   // Tokens
   const edm::EDGetTokenT<reco::GsfElectronCollection> electronProducer_;
@@ -152,6 +156,7 @@ TrackerNtuplizer::TrackerNtuplizer(const edm::ParameterSet& config)
   tree_->Branch("matchedToGenEle", &matchedToGenEle_);
   tree_->Branch("PV_Time", &PVTime_);
   tree_->Branch("PV_TimeErr", &PVTimeErr_);
+  tree_->Branch("sigTrkIdx",  &sigTrkIdx_);
   tree_->Branch("sigTrkTime",  &sigTrkTime_);
   tree_->Branch("sigTrkTimeErr", &sigTrkTimeErr_);
   tree_->Branch("sigTrkMtdMva", &sigTrkMtdMva_);
@@ -170,6 +175,9 @@ TrackerNtuplizer::TrackerNtuplizer(const edm::ParameterSet& config)
   tree_->Branch("Trackster_Time", &Trackster_Time_);
   tree_->Branch("Trackster_TimeErr", &Trackster_TimeErr_);
   tree_->Branch("Trackster_TrackIdx", &Trackster_TrackIdx_);
+  tree_->Branch("Trackster_Trackpt",  &Trackster_Trackpt_);
+  tree_->Branch("Trackster_Tracketa", &Trackster_Tracketa_);
+  tree_->Branch("Trackster_Trackphi", &Trackster_Trackphi_);
 }
 
 void TrackerNtuplizer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup){
@@ -222,7 +230,7 @@ void TrackerNtuplizer::analyze(const edm::Event& iEvent, const edm::EventSetup& 
 
     int sigTrkIdx = -1;
     const reco::Track* sigTrkPtr = 0;
-    
+      
     Ele_pt_ = electron->pt();
     Ele_eta_ = electron->eta();
     Ele_phi_ = electron->phi();
@@ -246,7 +254,7 @@ void TrackerNtuplizer::analyze(const edm::Event& iEvent, const edm::EventSetup& 
           }
         }
     }
-
+    sigTrkIdx_ = sigTrkIdx;
     // Get signal track time information
 
     reco::TrackRef sigTrkRef;
@@ -345,6 +353,9 @@ void TrackerNtuplizer::analyze(const edm::Event& iEvent, const edm::EventSetup& 
     Trackster_Time_.clear();
     Trackster_TimeErr_.clear();
     Trackster_TrackIdx_.clear();
+    Trackster_Trackpt_.clear();
+    Trackster_Tracketa_.clear();
+    Trackster_Trackphi_.clear();
 
     for (const auto& tst: tracksters){
       if (tst.vertices().empty()) continue;
@@ -360,6 +371,18 @@ void TrackerNtuplizer::analyze(const edm::Event& iEvent, const edm::EventSetup& 
       Trackster_Time_.push_back(tst.time());
       Trackster_TimeErr_.push_back(tst.timeError());
       Trackster_TrackIdx_.push_back(tst.trackIdx());
+      if(tst.trackIdx() != -1){
+        const reco::TrackRef trkRef(trackCollectionH_, tst.trackIdx());
+        const reco::Track& track = *trkRef;
+        Trackster_Trackpt_.push_back(track.pt());
+        Trackster_Tracketa_.push_back(track.eta());
+        Trackster_Trackphi_.push_back(track.phi());
+      }
+      else{
+        Trackster_Trackpt_.push_back(-1);
+        Trackster_Tracketa_.push_back(-1);
+        Trackster_Trackphi_.push_back(-1);
+      }
     }
 
     tree_->Fill();

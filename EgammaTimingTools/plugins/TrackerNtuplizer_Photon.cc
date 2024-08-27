@@ -94,6 +94,14 @@ private:
   std::vector<double> Trackster_Trackphi_;
   std::vector<bool>   Trackster_isSeed_;
 
+  std::vector<double> RecHit_dr_;
+  std::vector<double> RecHit_eta_;
+  std::vector<double> RecHit_phi_;
+  std::vector<int>    RecHit_layer_;
+  std::vector<double> RecHit_energy_;
+  std::vector<double> RecHit_time_;
+  std::vector<double> RecHit_time_error_;
+  std::vector<bool>   RecHit_isSeeded_;
   // Tokens
   const edm::EDGetTokenT<std::vector<reco::Photon>> photonProducer_;
   const edm::EDGetTokenT<reco::TrackCollection> trackProducer_;
@@ -106,6 +114,11 @@ private:
 
   edm::EDGetTokenT<std::vector<reco::CaloCluster>> layer_cluster_Token_;
   edm::Handle<std::vector<reco::CaloCluster>>      layer_cluster_Handle_;
+
+
+  const edm::EDGetTokenT<HGCRecHitCollection> hitsEE_;
+  const edm::EDGetTokenT<HGCRecHitCollection> hitsFH_;
+  const edm::EDGetTokenT<HGCRecHitCollection> hitsBH_;
 
   const edm::EDGetTokenT<edm::ValueMap<float>> mtdt0_H;
   const edm::EDGetTokenT<edm::ValueMap<float>> mtdSigmat0_H;
@@ -143,6 +156,9 @@ TrackerNtuplizer_Photon::TrackerNtuplizer_Photon(const edm::ParameterSet& config
     genParticleProducer_{consumes<edm::View<reco::GenParticle>>(config.getParameter<edm::InputTag>("genParticles"))},
     tracksterToken_{consumes(config.getParameter<edm::InputTag>("tracksterSrc"))},
     layer_cluster_Token_{consumes(config.getParameter<edm::InputTag>("LayerClusterSrc"))},
+    hitsEE_{consumes(config.getParameter<edm::InputTag>("RecHitsEE_Src"))},
+    hitsFH_{consumes(config.getParameter<edm::InputTag>("RecHitsFH_Src"))},
+    hitsBH_{consumes(config.getParameter<edm::InputTag>("RecHitsBH_Src"))},
     mtdt0_H{consumes(config.getParameter<edm::InputTag>("mtdt0"))},
     mtdSigmat0_H{consumes(config.getParameter<edm::InputTag>("mtdSigmat0"))},
     mtdTrkQualMVA_H{consumes(config.getParameter<edm::InputTag>("mtdTrkQualMVA"))},    
@@ -197,7 +213,14 @@ TrackerNtuplizer_Photon::TrackerNtuplizer_Photon(const edm::ParameterSet& config
   tree_->Branch("Trackster_Tracketa", &Trackster_Tracketa_);
   tree_->Branch("Trackster_Trackphi", &Trackster_Trackphi_);
 
-
+  tree_->Branch("HGCRecHit_dr",  &RecHit_dr_);
+  tree_->Branch("HGCRecHit_eta", &RecHit_eta_);
+  tree_->Branch("HGCRecHit_phi", &RecHit_phi_);
+  tree_->Branch("HGCRecHit_layer", &RecHit_layer_);
+  tree_->Branch("HGCRecHit_energy", &RecHit_energy_);
+  tree_->Branch("HGCRecHit_Time",   &RecHit_time_);
+  tree_->Branch("HGCRecHit_TimeError", &RecHit_time_error_);
+  tree_->Branch("HGCRecHit_isSeed", &RecHit_isSeeded_);
 }
 
 void TrackerNtuplizer_Photon::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup){
@@ -221,6 +244,10 @@ void TrackerNtuplizer_Photon::analyze(const edm::Event& iEvent, const edm::Event
 
   const reco::TrackCollection *trackCollection_ = (trackHandle.product());
   const edm::Handle <reco::TrackCollection> trackCollectionH_ = trackHandle;
+
+  const edm::Handle<HGCRecHitCollection> hitsEE_Handle_ = iEvent.getHandle(hitsEE_);
+  const edm::Handle<HGCRecHitCollection> hitsFH_Handle_ = iEvent.getHandle(hitsFH_);
+  const edm::Handle<HGCRecHitCollection> hitsBH_Handle_ = iEvent.getHandle(hitsBH_);
 
 
   std::vector <reco::Vertex> vertices = *vertexHandle;
@@ -423,6 +450,54 @@ void TrackerNtuplizer_Photon::analyze(const edm::Event& iEvent, const edm::Event
 
     }
 
+    auto checkAndFill = [this, &seedHitsAndFractions](const HGCRecHit& hit){
+
+      const GlobalPoint position = recHitTools_.getPosition(hit.id());
+      float eta = recHitTools_.getEta(position, 0);
+      float phi = recHitTools_.getPhi(position);
+      float deltar = reco::deltaR(Pho_eta_, Pho_phi_, eta, phi);
+      bool isBarrel = std::abs(Pho_eta_) < 1.479;
+      double intRadius = isBarrel ? intRadiusBarrel_ : intRadiusEndcap_;
+      if (deltar < extRadius_){
+
+        bool isSeeded = false;
+        for(unsigned int seedhitId = 0; seedhitId < seedHitsAndFractions.size(); seedhitId++){
+           if (isSeeded) break;
+           if(seedHitsAndFractions[seedhitId].first == hit.id()) isSeeded = true;
+        }
+        int layer = recHitTools_.getLayerWithOffset(hit.id());
+      
+
+
+        RecHit_dr_.push_back(deltar);
+        RecHit_eta_.push_back(eta);
+        RecHit_phi_.push_back(phi);
+        RecHit_layer_.push_back(layer);
+        RecHit_energy_.push_back(hit.energy());
+        RecHit_time_.push_back(hit.time());
+        RecHit_time_error_.push_back(hit.timeError());
+        RecHit_isSeeded_.push_back(isSeeded);
+      }
+    };
+
+
+    RecHit_dr_.clear();
+    RecHit_eta_.clear();
+    RecHit_phi_.clear();
+    RecHit_layer_.clear();
+    RecHit_energy_.clear();
+    RecHit_time_.clear();
+    RecHit_time_error_.clear();
+    RecHit_isSeeded_.clear();
+    for (const auto& hit : *hitsEE_Handle_){
+      checkAndFill(hit);
+    }
+    for (const auto& hit : *hitsFH_Handle_){
+      checkAndFill(hit);
+    }
+    for (const auto& hit : *hitsBH_Handle_){
+      checkAndFill(hit);
+    }
 
     tree_->Fill();
   }
@@ -459,4 +534,6 @@ int TrackerNtuplizer_Photon::matchToTruth(reco::Photon const &ph, edm::View<reco
   return FAKE_PHOTON;
 
 }
+
 DEFINE_FWK_MODULE(TrackerNtuplizer_Photon);
+

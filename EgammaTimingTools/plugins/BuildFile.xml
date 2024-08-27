@@ -18,6 +18,7 @@
 <use name="DataFormats/PatCandidates"/>
 <use name="CommonTools/UtilAlgos"/>
 <use name="FWCore/ServiceRegistry"/>
+<use name="RecoLocalCalo/HGCalRecAlgos"/>
 <export>
 </export>
 <library file="*.cc" name="RecoEgammaEgammaIsolationAlgosPlugins">
