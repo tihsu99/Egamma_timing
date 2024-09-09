@@ -71,19 +71,19 @@ def Draw_comparison(dataset_dict, histo_name, outputdir, fname, density = False,
 
     values, edges = histogram.to_numpy()
     center = (edges[:-1] + edges[1:]) / 2
-    data_dict[type_] = np.repeat(center, (values/np.sum(values) * 1000).astype(int))
+#    data_dict[type_] = np.repeat(center, (values/np.sum(values) * 1000).astype(int))
 
 
-  KS_test = dict()
-  y_space = 0.0
-  for type_ in PU_data:
-    ks_stat, ks_p_value = stats.ks_2samp(PU_data[type_], noPU_data[type_])
-    KS_test[type_] = ks_stat
-    ks_text = f'K-S test({type_}): {ks_stat:.3f}'
+#  KS_test = dict()
+#  y_space = 0.0
+#  for type_ in PU_data:
+#    ks_stat, ks_p_value = stats.ks_2samp(PU_data[type_], noPU_data[type_])
+#    KS_test[type_] = ks_stat
+#    ks_text = f'K-S test({type_}): {ks_stat:.3f}'
 
-    plt.text(0.05, 0.95 - y_space, ks_text, transform=ax.transAxes, fontsize=12,
-                 verticalalignment='top', bbox=dict(facecolor='white', alpha=0.5))
-    y_space -= 0.08
+#    plt.text(0.05, 0.95 - y_space, ks_text, transform=ax.transAxes, fontsize=12,
+#                 verticalalignment='top', bbox=dict(facecolor='white', alpha=0.5))
+#    y_space -= 0.08
   
   plt.title(histo_name)
   plt.xlabel(histo_name)
@@ -95,7 +95,7 @@ def Draw_comparison(dataset_dict, histo_name, outputdir, fname, density = False,
   plt.savefig(os.path.join(outputdir, fname + '.pdf'))
   plt.close()
 
-  return KS_test
+#  return KS_test
 
 def Draw_scan(dataset_dict, histo_name, outputdir, fname, density = False,  logy=False):
 
@@ -267,6 +267,8 @@ class Accumulator(processor.ProcessorABC):
     seedRecHit = RecHit[RecHit.isSeed & (RecHit.dr < 0.15)]
     RecHit     = RecHit[~RecHit.isSeed & (RecHit.dr < 0.15)]
     RecHit["seedTime"] = ak.broadcast_arrays(ak.fill_none(ak.mean(seedTrackster.Time,axis = 1), -99), RecHit.energy)[0]
+
+    histograms['seedRecHit_Count'] = Get_hist([100, -0.5, 99.5], ak.num(seedRecHit.energy), events.Weight)
     #RecHit["RecHitSeedTime"] = ak.broadcast_arrays(ak.mean(seedRecHit.Time, weight = seedRecHit.energy, axis = 1), RecHit.energy)[0]
 
 #    histograms['RecHit_energy'] = Get_hist([20, 0, 5],   ak.flatten(RecHit.energy), ak.flatten(RecHit.weight))
@@ -349,13 +351,13 @@ def analysis(region, config):
 
 
   for variable_ in Comparison:
-    if "Count" in variable_:
+    if "Count" == variable_:
       Draw_comparison(output, variable_, store_path, variable_, density=False, logy = ("Isolation" in variable_))
     else:
       Draw_comparison(output, variable_, store_path, variable_, density=True, logy = ("Isolation" in variable_))
 
-  for variable_ in scanName:
-    Draw_scan(output, variable_, os.path.join(store_path, variable_), variable_, density = True, logy = ("Isolation" in variable_))
+#  for variable_ in scanName:
+#    Draw_scan(output, variable_, os.path.join(store_path, variable_), variable_, density = True, logy = ("Isolation" in variable_))
 
 def produce_ntuple(region, config):
   input_path  = os.path.join(config.indir, config.particle, region)

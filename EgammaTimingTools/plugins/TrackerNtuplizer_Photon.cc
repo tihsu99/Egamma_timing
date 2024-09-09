@@ -93,6 +93,7 @@ private:
   std::vector<double> Trackster_Tracketa_;
   std::vector<double> Trackster_Trackphi_;
   std::vector<bool>   Trackster_isSeed_;
+  std::vector<bool>   Trackster_inCluster_;
 
   std::vector<double> RecHit_dr_;
   std::vector<double> RecHit_eta_;
@@ -102,6 +103,7 @@ private:
   std::vector<double> RecHit_time_;
   std::vector<double> RecHit_time_error_;
   std::vector<bool>   RecHit_isSeeded_;
+  std::vector<bool>   RecHit_inCluster_;
   // Tokens
   const edm::EDGetTokenT<std::vector<reco::Photon>> photonProducer_;
   const edm::EDGetTokenT<reco::TrackCollection> trackProducer_;
@@ -203,6 +205,7 @@ TrackerNtuplizer_Photon::TrackerNtuplizer_Photon(const edm::ParameterSet& config
   tree_->Branch("Track_dxy", &Track_dxy_);
   tree_->Branch("Trackster_dr", &Trackster_dr_);
   tree_->Branch("Trackster_isSeed", &Trackster_isSeed_);
+  tree_->Branch("Trackster_inCluster", &Trackster_inCluster_);
   tree_->Branch("Trackster_pt", &Trackster_pt_);
   tree_->Branch("Trackster_eta", &Trackster_eta_);
   tree_->Branch("Trackster_phi", &Trackster_phi_);
@@ -221,6 +224,7 @@ TrackerNtuplizer_Photon::TrackerNtuplizer_Photon(const edm::ParameterSet& config
   tree_->Branch("HGCRecHit_Time",   &RecHit_time_);
   tree_->Branch("HGCRecHit_TimeError", &RecHit_time_error_);
   tree_->Branch("HGCRecHit_isSeed", &RecHit_isSeeded_);
+  tree_->Branch("HGCRecHit_inCluster", &RecHit_inCluster_);
 }
 
 void TrackerNtuplizer_Photon::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup){
@@ -277,6 +281,7 @@ void TrackerNtuplizer_Photon::analyze(const edm::Event& iEvent, const edm::Event
    
     
     const reco::CaloClusterPtr& photon_seed = photon->superCluster()->seed();
+    const reco::CaloClusterPtrVector& photon_clusters = photon->superCluster()->clusters();
     const std::vector<std::pair<DetId, float>>& seedHitsAndFractions = photon_seed->hitsAndFractions();
 
     std::cout << "------------------" << std::endl;
@@ -391,6 +396,7 @@ void TrackerNtuplizer_Photon::analyze(const edm::Event& iEvent, const edm::Event
     Trackster_phi_.clear();
     Trackster_dr_.clear();
     Trackster_isSeed_.clear();
+    Trackster_inCluster_.clear();
     Trackster_Time_.clear();
     Trackster_TimeErr_.clear();
     Trackster_TrackIdx_.clear();
@@ -429,8 +435,10 @@ void TrackerNtuplizer_Photon::analyze(const edm::Event& iEvent, const edm::Event
 
       // Check if trackster is seeded or not.
       bool isSeedTrackster = false;
+      bool Trackster_inCluster = false;
+
       for (const auto lcId : tst.vertices()){
-        if (isSeedTrackster) break;
+        if (isSeedTrackster && Trackster_inCluster) break;
         const std::vector<std::pair<DetId, float>>& hit_and_fractions = layerClusters[lcId].hitsAndFractions();
 
         for(unsigned int seedhitId = 0; seedhitId < seedHitsAndFractions.size(); seedhitId++){
@@ -444,13 +452,28 @@ void TrackerNtuplizer_Photon::analyze(const edm::Event& iEvent, const edm::Event
             if(hit_detId == seed_detId) isSeedTrackster = true;
           }
         }
+
+        for (reco::CaloClusterPtrVector::const_iterator bcit = photon_clusters.begin(); bcit != photon_clusters.end(); ++bcit){
+          if(Trackster_inCluster) break;
+          const std::vector<std::pair<DetId, float>>& clusterHitsAndFractions = (*bcit)->hitsAndFractions();
+          for(unsigned int cluster_hitId = 0; cluster_hitId < clusterHitsAndFractions.size(); cluster_hitId++){
+            if(Trackster_inCluster) break;
+            for(unsigned int hitId = 0; hitId < hit_and_fractions.size(); hitId ++){
+              if (Trackster_inCluster) break;
+              const auto hit_detId = hit_and_fractions[hitId].first;
+              const auto hit_fraction = hit_and_fractions[hitId].second;
+              if(hit_detId == clusterHitsAndFractions[cluster_hitId].first) Trackster_inCluster = true;
+            }
+          }
+        }
       }
       Trackster_isSeed_.push_back(isSeedTrackster);
+      Trackster_inCluster_.push_back(Trackster_inCluster);
       if(isSeedTrackster) std::cout << "Find a seed trackster " << trackster_Index << std::endl;
 
     }
 
-    auto checkAndFill = [this, &seedHitsAndFractions](const HGCRecHit& hit){
+    auto checkAndFill = [this, &seedHitsAndFractions, &photon_clusters](const HGCRecHit& hit){
 
       const GlobalPoint position = recHitTools_.getPosition(hit.id());
       float eta = recHitTools_.getEta(position, 0);
@@ -461,13 +484,21 @@ void TrackerNtuplizer_Photon::analyze(const edm::Event& iEvent, const edm::Event
       if (deltar < extRadius_){
 
         bool isSeeded = false;
+        bool inCluster = false;
         for(unsigned int seedhitId = 0; seedhitId < seedHitsAndFractions.size(); seedhitId++){
            if (isSeeded) break;
            if(seedHitsAndFractions[seedhitId].first == hit.id()) isSeeded = true;
         }
         int layer = recHitTools_.getLayerWithOffset(hit.id());
       
-
+        for (reco::CaloClusterPtrVector::const_iterator bcit = photon_clusters.begin(); bcit != photon_clusters.end(); ++bcit){
+          if(inCluster) break;
+          const std::vector<std::pair<DetId, float>>& clusterHitsAndFractions = (*bcit)->hitsAndFractions();
+          for(unsigned int hitId = 0; hitId < clusterHitsAndFractions.size(); hitId++){
+            if (inCluster) break;
+            if(clusterHitsAndFractions[hitId].first == hit.id()) inCluster = true;
+          }
+        }
 
         RecHit_dr_.push_back(deltar);
         RecHit_eta_.push_back(eta);
@@ -477,6 +508,7 @@ void TrackerNtuplizer_Photon::analyze(const edm::Event& iEvent, const edm::Event
         RecHit_time_.push_back(hit.time());
         RecHit_time_error_.push_back(hit.timeError());
         RecHit_isSeeded_.push_back(isSeeded);
+        RecHit_inCluster_.push_back(inCluster);
       }
     };
 
@@ -489,6 +521,7 @@ void TrackerNtuplizer_Photon::analyze(const edm::Event& iEvent, const edm::Event
     RecHit_time_.clear();
     RecHit_time_error_.clear();
     RecHit_isSeeded_.clear();
+    RecHit_inCluster_.clear();
     for (const auto& hit : *hitsEE_Handle_){
       checkAndFill(hit);
     }

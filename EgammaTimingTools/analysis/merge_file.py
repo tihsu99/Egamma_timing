@@ -9,7 +9,7 @@ if __name__ == '__main__':
     parser.add_argument('--particle', type=str)
     args = parser.parse_args()
     
-    region = ['barrel', 'endcap']
+    region = ['endcap']
     for region_ in region:
       INDIR = os.path.join(args.indir, args.particle, region_)
       samples = os.listdir(INDIR)
