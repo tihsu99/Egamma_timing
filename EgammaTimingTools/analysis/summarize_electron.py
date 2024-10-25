@@ -62,69 +62,82 @@ def Integral_AUC(signal_eff, bkg_eff):
     integral_ += (bkg_eff[ibin] + bkg_eff[ibin+1])/2. * abs(signal_eff[ibin+1] - signal_eff[ibin])
   return 1.0 - integral_
 
-def obtain_ROC(ref_, type_, Dt_list, Other_list, OtherPrefix, region, fin, plotdir='plot', other_ref=0.0):
+def obtain_ROC(Dt_list, Other_list, OtherPrefix, region, fin, plotdir='plot', other_ref=0.0):
 
   fin_root = ROOT.TFile.Open(fin, "READ")
   c = ROOT.TCanvas()
 
   color_template_forROC = [ROOT.kAzure-5, ROOT.kTeal+5, ROOT.kOrange-3, ROOT.kViolet-4, ROOT.kGreen+2, ROOT.kCyan+2, ROOT.kAzure-7, ROOT.kBlue-7, ROOT.kViolet-3, ROOT.kRed-5, ROOT.kRed+1, ROOT.kGreen-10, ROOT.kAzure-9]
 
-  h_AUC = ROOT.TH2D("",";{};{}".format("%sWrt%sMax"%(type_,ref_), OtherPrefix), len(Dt_list), 0, len(Dt_list), len(Other_list), 0, len(Other_list))
-  h_AUC.SetDirectory(0)
+  h_AUC = dict()
   mg = ROOT.TMultiGraph()
+
+
+  ROOT.gStyle.SetPaintTextFormat(".3f")
+
+  for type_ in ["Dt", "DtSigni"]:
+    for ref_ in ["PV", "SIG"]:
+      h_AUC[type_+ref_] = ROOT.TH2D("",";{};{}".format("%sWrt%sMax"%(type_,ref_), OtherPrefix), len(Dt_list), 0, len(Dt_list), len(Other_list), 0, len(Other_list))
+      h_AUC[type_+ref_].SetDirectory(0)
+
 
   for iOther, Other in enumerate(Other_list):
     AUC_best = 0.0
     graph = None
-    for iDt, dtMax in enumerate(Dt_list):
-      dtMaxStr = "%sWrt%sMax%s" %(type_, ref_, str(dtMax).replace(".", "p"))
-      OtherStr = "{}{}".format(OtherPrefix, str(Other).replace(".", "p"))
-      h_AUC.GetXaxis().SetBinLabel(iDt+1, str(dtMax))
-      h_AUC.GetYaxis().SetBinLabel(iOther+1, str(Other))
-      var_ = ('eleTrkIso{}{}'.format(dtMaxStr, OtherStr))
+    for type_ in ["Dt", "DtSigni"]:
+      for ref_ in ["PV", "SIG"]:
 
-      hist_DY = fin_root.Get('DY_{}_{}'.format(var_, region)).Clone()
-      hist_TT = fin_root.Get('TT_{}_{}'.format(var_, region)).Clone()
-      hist_DY.SetDirectory(0)
-      hist_TT.SetDirectory(0)
+        for iDt, dtMax in enumerate(Dt_list):
+          dtMaxStr = "%sWrt%sMax%s" %(type_, ref_, str(dtMax).replace(".", "p"))
+          OtherStr = "{}{}".format(OtherPrefix, str(Other).replace(".", "p"))
+          h_AUC[type_+ref_].GetXaxis().SetBinLabel(iDt+1, str(dtMax))
+          h_AUC[type_+ref_].GetYaxis().SetBinLabel(iOther+1, str(Other))
+          var_ = ('eleTrkIso{}{}'.format(dtMaxStr, OtherStr))
 
-      signal_eff = array('d')
-      bkg_eff = array('d')
+          hist_DY = fin_root.Get('DY_{}_{}'.format(var_, region)).Clone()
+          hist_TT = fin_root.Get('TT_{}_{}'.format(var_, region)).Clone()
+          hist_DY.SetDirectory(0)
+          hist_TT.SetDirectory(0)
 
-      nbinx = hist_DY.GetNbinsX()
-      for ibinx in range(nbinx + 2):
-        signal_eff.append(hist_DY.Integral(-1, 1 + nbinx-ibinx)/float(hist_DY.Integral(-1,nbinx+1)))
-        bkg_eff.append(float(hist_TT.Integral(-1, 1 + nbinx-ibinx))/float(hist_TT.Integral(-1, nbinx+1)))
-      AUC = Integral_AUC(signal_eff, bkg_eff)
-      h_AUC.SetBinContent(iDt+1, iOther+1, AUC)
+          signal_eff = array('d')
+          bkg_eff = array('d')
+
+          nbinx = hist_DY.GetNbinsX()
+          for ibinx in range(nbinx + 2):
+            signal_eff.append(hist_DY.Integral(-1, 1 + nbinx-ibinx)/float(hist_DY.Integral(-1,nbinx+1)))
+            bkg_eff.append(float(hist_TT.Integral(-1, 1 + nbinx-ibinx))/float(hist_TT.Integral(-1, nbinx+1)))
+          AUC = Integral_AUC(signal_eff, bkg_eff)
+          h_AUC[type_+ref_].SetBinContent(iDt+1, iOther+1, AUC)
 
 
-      if Other == other_ref and dtMax == 9999.0:
-        graph = ROOT.TGraph(len(signal_eff), signal_eff, bkg_eff)
-        graph.SetTitle('default'.format(OtherStr, dtMaxStr))
-        graph.SetLineColor(ROOT.kBlack)
-        graph.SetLineWidth(5)
-        graph.SetMarkerColor(ROOT.kBlack)
-        graph.SetMarkerStyle(8)
-        graph.SetMarkerSize(0.6)
-        mg.Add(graph, "l")
-      if AUC > AUC_best:
-        AUC_best = AUC
-        graph = ROOT.TGraph(len(signal_eff), signal_eff, bkg_eff)
-        graph.SetTitle('{}, {}'.format(OtherStr, dtMaxStr))
-        graph.SetLineColor(color_template_forROC[iOther+1])
-        graph.SetLineWidth(2)
-        graph.SetMarkerColor(color_template_forROC[iOther+1])
-        graph.SetMarkerStyle(8)
-        graph.SetMarkerSize(0.6)
+          if Other == other_ref and dtMax == 9999.0 and type_=="Dt" and ref_ == "PV":
+            graph = ROOT.TGraph(len(signal_eff), signal_eff, bkg_eff)
+            graph.SetTitle('default'.format(OtherStr, dtMaxStr))
+            graph.SetLineColor(ROOT.kBlack)
+            graph.SetLineWidth(5)
+            graph.SetMarkerColor(ROOT.kBlack)
+            graph.SetMarkerStyle(8)
+            graph.SetMarkerSize(0.6)
+            mg.Add(graph, "l")
+          if AUC > AUC_best:
+            AUC_best = AUC
+            graph = ROOT.TGraph(len(signal_eff), signal_eff, bkg_eff)
+            graph.SetTitle(('{}, {}'.format(OtherStr, dtMaxStr)).replace('pt','Pt').replace('p','.').replace('Max','<').replace('Min','>'))
+            graph.SetLineColor(color_template_forROC[iOther+1])
+            graph.SetLineWidth(2)
+            graph.SetMarkerColor(color_template_forROC[iOther+1])
+            graph.SetMarkerStyle(8)
+            graph.SetMarkerSize(0.6)
     mg.Add(graph, "l")
 
-
-  h_AUC.Draw("COLZ")
-  c.SaveAs(os.path.join(plotdir, "AUC_{}Wrt{}_{}_{}.png".format(type_, ref_, OtherPrefix, region))) 
-  c.SaveAs(os.path.join(plotdir, "AUC_{}Wrt{}_{}_{}.pdf".format(type_, ref_, OtherPrefix, region))) 
+  for type_ in ["Dt", "DtSigni"]:
+    for ref_ in ["PV", "SIG"]:
+      h_AUC[type_+ref_].Draw("COLZ TEXT")
+      c.SaveAs(os.path.join(plotdir, "AUC_{}Wrt{}_{}_{}.png".format(type_, ref_, OtherPrefix, region))) 
+      c.SaveAs(os.path.join(plotdir, "AUC_{}Wrt{}_{}_{}.pdf".format(type_, ref_, OtherPrefix, region))) 
 
   c = ROOT.TCanvas('','',650, 800)
+  c.SetLeftMargin(0.15)
   c.cd()
   mg.SetTitle("ROC;Signal Efficiency; Bkg Efficiency")
   c.DrawFrame(0.8,0.3,1.0,0.75)
@@ -132,12 +145,16 @@ def obtain_ROC(ref_, type_, Dt_list, Other_list, OtherPrefix, region, fin, plotd
   mg.Draw('alp')
   mg.GetXaxis().SetLimits(0.7, 1.0);
   c.Modified()
-  mg.SetMinimum(0.1);
+  if region == 'endcap':
+    mg.SetMinimum(0.25);
+  else:
+    mg.SetMinimum(0.15)
   mg.SetMaximum(0.75)
   c.Modified()
-  c.BuildLegend(0.15, 0.5, 0.4, 0.9)
-  c.SaveAs(os.path.join(plotdir, "ROC_{}Wrt{}_{}_{}.png".format(type_, ref_, OtherPrefix, region))) 
-  c.SaveAs(os.path.join(plotdir, "ROC_{}Wrt{}_{}_{}.pdf".format(type_, ref_, OtherPrefix, region))) 
+  Legend = c.BuildLegend(0.15, 0.5, 0.5, 0.9)
+  Legend.SetTextSize(0.02)
+  c.SaveAs(os.path.join(plotdir, "ROC_{}_{}.png".format(OtherPrefix, region))) 
+  c.SaveAs(os.path.join(plotdir, "ROC_{}_{}.pdf".format(OtherPrefix, region))) 
 
 def obtain_distribution(maxchunks=None, fout='record.root', indir='./'):
 
@@ -310,11 +327,9 @@ def draw_distribution(fin_name = 'record.root'):
   l_ptMin = [0.01, 0.05, 0.1, 0.5, 1.0, 5.0]
 
   for region in ['endcap', 'barrel']:
-    for type_ in ["Dt", "DtSigni"]:
-      for ref_ in ["PV", "SIG"]:
-        obtain_ROC(ref_=ref_, type_=type_, Dt_list=l_dtMax_forROC, Other_list=l_dzMax, OtherPrefix="dzMax", region=region, fin=fin_name, other_ref=0.15)
-        obtain_ROC(ref_=ref_, type_=type_, Dt_list=l_dtMax_forROC, Other_list=l_MtdMvaMin, OtherPrefix="MtdMvaMin", region=region, fin=fin_name, other_ref=0.5)
-        obtain_ROC(ref_=ref_, type_=type_, Dt_list=l_dtMax_forROC, Other_list=l_ptMin, OtherPrefix="ptMin", region=region, fin=fin_name, other_ref=1.0)
+        obtain_ROC(Dt_list=l_dtMax_forROC, Other_list=l_dzMax, OtherPrefix="dzMax", region=region, fin=fin_name, other_ref=0.15)
+        obtain_ROC(Dt_list=l_dtMax_forROC, Other_list=l_MtdMvaMin, OtherPrefix="MtdMvaMin", region=region, fin=fin_name, other_ref=0.5)
+        obtain_ROC(Dt_list=l_dtMax_forROC, Other_list=l_ptMin, OtherPrefix="ptMin", region=region, fin=fin_name, other_ref=1.0)
        
 
 if __name__ == '__main__':
