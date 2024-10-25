@@ -16,17 +16,14 @@ def prepare_shell(shell_file, command, condor, FarmDir):
     shell.write('#!/bin/bash\n')
     shell.write('WORKDIR=%s\n'%cwd)
     shell.write('cd %s\n'%cmsswBase)
-#    shell.write('eval `scram r -sh`\n')
+    shell.write('eval `scram r -sh`\n')
     shell.write('cd ${WORKDIR}\n')
     shell.write(command)
   condor.write('cfgFile=%s\n'%shell_file)
   condor.write('queue 1\n')
 
 def wrapper_condor(dataset_name, dataset_path, condor, outdir, farm_dir, barrel=False, check=False, particle='electron'):
-  print('start to process {}'.format(dataset_name))
-  print("xrdfs root://se01.grid.nchc.org.tw// ls " + dataset_path)
-  os.system("xrdfs root://se01.grid.nchc.org.tw// ls " + dataset_path)
-  result = subprocess.Popen("xrdfs root://se01.grid.nchc.org.tw// ls " + dataset_path, shell=True, stdout=subprocess.PIPE)
+  result = subprocess.Popen("ls " + dataset_path, shell=True, stdout=subprocess.PIPE)
   subprocess_return = result.stdout.read()
   file_list = subprocess_return.decode('utf-8').split("\n")
   n_file = len(file_list)
@@ -44,7 +41,7 @@ def wrapper_condor(dataset_name, dataset_path, condor, outdir, farm_dir, barrel=
         if particle == 'electron':
           a = h.nEvent
         else:
-          a = h.Pho_eta
+          a = h.eta
     #    print(h)
         fout_root.Close()
         continue
@@ -52,24 +49,20 @@ def wrapper_condor(dataset_name, dataset_path, condor, outdir, farm_dir, barrel=
         print(error)
         print("reproduce {}".format(fout))
     print(idx, inf)
-    inf_full_path = ('davs://se01.grid.nchc.org.tw//' +  inf)
+    inf_full_path = os.path.join(dataset_path ,  inf)
     print(inf_full_path)
     region = 'barrel' if barrel else 'endcap'
     shell_file = '{}_{}_{}_{}.sh'.format(dataset_name, idx, region, particle)
-    command = "mkdir -p /tmp/tihsu/production\n"
-    command += "gfal-copy {} /tmp/tihsu/production/{}_{}.root\n".format(inf_full_path, dataset_name, idx)
-    command += "eval `scram r -sh`\n"
-    inf_full_path = "/tmp/tihsu/production/{}_{}.root".format(dataset_name, idx)
     if particle == 'electron':
       if not barrel: 
-        command += 'cmsRun ElectronTrackerNtuplizer.py electronLabel=ecalDrivenGsfElectronsHGC inputFiles={} outDir={} outFileNumber={}'.format(inf_full_path, os.path.join(outdir, dataset_name), idx)
+        command = 'cmsRun ElectronTrackerNtuplizer.py electronLabel=ecalDrivenGsfElectronsHGC inputFiles={} outDir={} outFileNumber={}'.format(inf_full_path, os.path.join(outdir, dataset_name), idx)
       else:
-        command += 'cmsRun ElectronTrackerNtuplizer.py inputFiles={} outDir={} outFileNumber={}'.format(inf_full_path, os.path.join(outdir, dataset_name), idx)
+        command = 'cmsRun ElectronTrackerNtuplizer.py inputFiles={} outDir={} outFileNumber={}'.format(inf_full_path, os.path.join(outdir, dataset_name), idx)
     else:
       if not barrel:
-        command += 'cmsRun PhotonTrackerNtuplizer.py photonLabel=photonsHGC inputFiles={} outDir={} outFileNumber={}'.format(inf_full_path, os.path.join(outdir, dataset_name), idx)
+        command = 'cmsRun PhotonTrackerNtuplizer.py photonLabel=photonsHGC inputFiles={} outDir={} outFileNumber={}'.format(inf_full_path, os.path.join(outdir, dataset_name), idx)
       else:
-        command += 'cmsRun testPhotonMVA_cfg_mod1.py inputFiles={} outDir={} outFileNumber={}'.format(inf_full_path, os.path.join(outdir, dataset_name), idx)
+        command = 'cmsRun PhotonTrackerNtuplizer.py inputFiles={} outDir={} outFileNumber={}'.format(inf_full_path, os.path.join(outdir, dataset_name), idx)
 
 
     prepare_shell(shell_file, command, condor, farm_dir)
@@ -92,7 +85,6 @@ if __name__ == '__main__':
 
   farm_dir = os.path.join('./', 'Farm')
   os.system('mkdir -p %s '%farm_dir)
-
   ##############
   ##  Condor  ##  
   ##############
@@ -126,10 +118,8 @@ if __name__ == '__main__':
     wrapper_condor('DY_noPU', DY_noPU_path, condor, os.path.join(args.outdir, 'barrel'), farm_dir, barrel=True, check=args.check)
     wrapper_condor('TT_noPU', TT_noPU_path, condor, os.path.join(args.outdir, 'barrel'), farm_dir, barrel=True, check=args.check)
   else:
-    wrapper_condor('SinglePhoton2To200_noPU', '/cms/store/user/tihsu/ele_reRECO/2024-09-06/SinglePhoton_Pt-2To200-gun/crab_SinglePhoton2to200_wTICL_noPU/240906_171249/0000', condor, os.path.join(args.outdir, 'endcap'), farm_dir, barrel=False, check=args.check, particle=args.particle)
-    wrapper_condor('SinglePhoton2To200', '/cms/store/user/tihsu/ele_reRECO/2024-09-06/SinglePhoton_Pt-2To200-gun/crab_SinglePhoton2to200_wTICL/240906_171136/0000', condor, os.path.join(args.outdir, 'endcap'), farm_dir, barrel=False, check=args.check, particle=args.particle)
-    wrapper_condor('QCDEM', '/cms/store/user/tihsu/ele_reRECO/2024-09-06/QCD_Pt-15To3000_EMEnriched_TuneCP5_14TeV-pythia8/crab_QCDEMEnriched_Pt-15To3000_wTICL/240906_171448/0000', condor, os.path.join(args.outdir, 'endcap'), farm_dir, barrel=False, check=args.check, particle=args.particle)
-    wrapper_condor('QCDEM_noPU', '/cms/store/user/tihsu/ele_reRECO/2024-09-06/QCD_Pt-15To3000_TuneCP5_Flat_14TeV-pythia8/crab_QCD_Pt-15To3000_wTICL_noPU/240906_171359/0000', condor, os.path.join(args.outdir, 'endcap'), farm_dir, barrel=False, check=args.check, particle=args.particle)
+    wrapper_condor('SinglePhoton2To200', '/eos/user/t/tihsu/database/EGM_reRECO_v2/SinglePhoton2To200/', condor, os.path.join(args.outdir, 'endcap'), farm_dir, barrel=False, check=args.check, particle=args.particle)
+    wrapper_condor('SinglePhoton2To200_noPU', '/eos/user/t/tihsu/database/EGM_reRECO_v2/SinglePhoton2To200_noPU/', condor, os.path.join(args.outdir, 'endcap'), farm_dir, barrel=False, check=args.check, particle=args.particle)
 #    wrapper_condor('SinglePhoton200To500', 'root://se01.grid.nchc.org.tw//cms/store/user/tihsu/ele_reRECO/2024-01-19/SinglePhoton_Pt200To500-gun/crab_SinglePhoton200to500/240303_222110/0000', condor, os.path.join(args.outdir, 'endcap'), farm_dir, barrel = False, check=args.check, particle=args.particle)
 #    wrapper_condor('QCD15to20', 'root://se01.grid.nchc.org.tw//cms/store/user/tihsu/ele_reRECO/2024-01-19/QCD_Pt-15To20_EMEnriched_TuneCP5_14TeV-pythia8/crab_QCD15to20/240303_221527/0000', condor, os.path.join(args.outdir, 'endcap'), farm_dir, barrel=False, check=args.check, particle=args.particle)
 #    wrapper_condor('QCD20to30', 'root://se01.grid.nchc.org.tw//cms/store/user/tihsu/ele_reRECO/2024-01-19/QCD_Pt-20To30_EMEnriched_TuneCP5_14TeV-pythia8/crab_QCD20to30/240303_221604/0000', condor, os.path.join(args.outdir, 'endcap'), farm_dir, barrel=False, check=args.check, particle=args.particle)

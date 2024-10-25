@@ -180,8 +180,8 @@ def Draw_hist2D(hist, title, xlabel, ylabel, outputdir, fname):
   plt.close()
 
 class Accumulator(processor.ProcessorABC):
-  def __init__(self):
-    pass
+  def __init__(self, Kinematic_Weight = None):
+    self.corr = Kinematic_Weight
 
   def process(self, events):
 
@@ -196,7 +196,9 @@ class Accumulator(processor.ProcessorABC):
     else:
       events = events[(events['matchedToGenPho'] == 1)]
 
-    events["Weight"] = ak.ones_like(events.Pho.pt)
+    corr = self.corr['_noPU'] if '_noPU' in dataset else self.corr[''] 
+      
+    events["Weight"] = corr(events.Pho.pt, events.Pho.eta) if not 'NonPrompt' in dataset else ak.ones_like(events.Pho.pt)
     histograms['Count']    = Get_hist([1,-0.5,0.5], ak.from_numpy(np.zeros(len(events))), events["Weight"])
     histograms['Pho_pt']   = Get_hist([50, 15, 200], events.Pho.pt, events["Weight"])
     histograms['Pho_eta']  = Get_hist([10, -2.5, 2.5], events.Pho.eta, events["Weight"])
@@ -228,14 +230,19 @@ class Accumulator(processor.ProcessorABC):
 
     seedTrackster = Trackster[(Trackster.pt > 1) & (Trackster.dr < 0.30) &  (Trackster.isSeed)]
     Trackster["seedTime"] = ak.broadcast_arrays(ak.fill_none(ak.mean(seedTrackster.Time, axis = 1), -99), Trackster.pt)[0]
+    clusterTrackster = Trackster[(Trackster.pt > 1) & (Trackster.dr < 0.30) &  (Trackster.inCluster)]
+    Trackster_ClusterCleaned = Trackster[(Trackster.pt > 1) & (Trackster.dr < 0.30) & ~(Trackster.inCluster)]
     Trackster     = Trackster[(Trackster.pt > 1) & (Trackster.dr < 0.30) & ~(Trackster.isSeed)]
 
+
+    ############### Seed Cleaning ###################
     histograms['Trackster_pt'] = Get_hist([20, 0, 20], ak.flatten(Trackster.pt), ak.flatten(Trackster.weight))
     histograms['Trackster_dr'] = Get_hist([20, 0, 0.3],ak.flatten(Trackster.dr), ak.flatten(Trackster.weight))
     histograms['Trackster_Time'] = Get_hist([50, 0, 0.2], abs(ak.flatten(Trackster.Time - ak.unflatten(PV.Time, counts = 1))), ak.flatten(Trackster.weight))
     histograms['Trackster_Time_zoom'] = Get_hist([49, 0.02, 0.2], abs(ak.flatten(Trackster.Time - ak.unflatten(PV.Time, counts = 1))), ak.flatten(Trackster.weight))
     histograms['Trackster_TimeErr']   = Get_hist([49, 0.02, 0.1], ak.flatten(Trackster.TimeErr), ak.flatten(Trackster.weight))
-    histograms['Trackster_HGCsigTime'] = Get_hist([50, 0, 0.1], ak.flatten(abs(Trackster.Time - Trackster.seedTime)), ak.flatten(Trackster.weight))
+    histograms['Trackster_HGCsigTime'] = Get_hist([30, 0, 0.3], ak.flatten(abs(Trackster.Time - Trackster.seedTime)), ak.flatten(Trackster.weight))
+    histograms['Trackster_HGCsigTime_zoom'] = Get_hist([29, 0.01, 0.3], ak.flatten(abs(Trackster.Time - Trackster.seedTime)), ak.flatten(Trackster.weight))
     histograms['Trackster_pt_ratio']  = Get_hist([50, 0.00, 1.0], ak.flatten(Trackster.pt_ratio), ak.flatten(Trackster.weight))
     histograms['Trackster_Count']     = Get_hist([10, -0.5, 9.5], ak.num(Trackster.pt), events.Weight)
     histograms['Trackster_match_Count'] = Get_hist([10, -0.5, 9.5], ak.num(Trackster.pt[Trackster.Trackpt > 0]), events.Weight)
@@ -261,6 +268,44 @@ class Accumulator(processor.ProcessorABC):
     histograms['seedTrackster_pt_ratio'] = Get_hist([50, 0., 1.0], ak.flatten(seedTrackster.pt_ratio), ak.flatten(seedTrackster.weight))
     histograms['seedTrackster_Count'] = Get_hist([10, -0.5, 9.5], ak.num(seedTrackster.pt), events.Weight)
     histograms['seedTrackster_match_rate'] = Get_hist([10, 0, 0.5], ak.num(seedTrackster.pt[seedTrackster.Trackpt > 0])/ak.num(seedTrackster.pt), events.Weight)
+
+    ############### Cluster Cleaning ##########################
+    histograms['Trackster_ClusterCleaned_pt'] = Get_hist([20, 0, 20], ak.flatten(Trackster_ClusterCleaned.pt), ak.flatten(Trackster_ClusterCleaned.weight))
+    histograms['Trackster_ClusterCleaned_dr'] = Get_hist([20, 0, 0.3],ak.flatten(Trackster_ClusterCleaned.dr), ak.flatten(Trackster_ClusterCleaned.weight))
+    histograms['Trackster_ClusterCleaned_Time'] = Get_hist([50, 0, 0.2], abs(ak.flatten(Trackster_ClusterCleaned.Time - ak.unflatten(PV.Time, counts = 1))), ak.flatten(Trackster_ClusterCleaned.weight))
+    histograms['Trackster_ClusterCleaned_Time_zoom'] = Get_hist([49, 0.02, 0.2], abs(ak.flatten(Trackster_ClusterCleaned.Time - ak.unflatten(PV.Time, counts = 1))), ak.flatten(Trackster_ClusterCleaned.weight))
+    histograms['Trackster_ClusterCleaned_TimeErr']   = Get_hist([49, 0.02, 0.1], ak.flatten(Trackster_ClusterCleaned.TimeErr), ak.flatten(Trackster_ClusterCleaned.weight))
+    histograms['Trackster_ClusterCleaned_HGCsigTime'] = Get_hist([30, 0, 0.3], ak.flatten(abs(Trackster_ClusterCleaned.Time - Trackster_ClusterCleaned.seedTime)), ak.flatten(Trackster_ClusterCleaned.weight))
+    histograms['Trackster_ClusterCleaned_HGCsigTime_zoom'] = Get_hist([29, 0.01, 0.3], ak.flatten(abs(Trackster_ClusterCleaned.Time - Trackster_ClusterCleaned.seedTime)), ak.flatten(Trackster_ClusterCleaned.weight))
+    histograms['Trackster_ClusterCleaned_pt_ratio']  = Get_hist([50, 0.00, 1.0], ak.flatten(Trackster_ClusterCleaned.pt_ratio), ak.flatten(Trackster_ClusterCleaned.weight))
+    histograms['Trackster_ClusterCleaned_Count']     = Get_hist([10, -0.5, 9.5], ak.num(Trackster_ClusterCleaned.pt), events.Weight)
+    histograms['Trackster_ClusterCleaned_match_Count'] = Get_hist([10, -0.5, 9.5], ak.num(Trackster_ClusterCleaned.pt[Trackster_ClusterCleaned.Trackpt > 0]), events.Weight)
+    histograms['Trackster_ClusterCleaned_match_rate']  = Get_hist([10, 0, 0.5], ak.num(Trackster_ClusterCleaned.pt[Trackster_ClusterCleaned.Trackpt > 0])/ak.num(Trackster_ClusterCleaned.pt), events.Weight)
+    histograms['Trackster_ClusterCleaned_Isolation']    = Get_hist([20, 0.0, 20.0], ak.sum(Trackster_ClusterCleaned.pt, axis = -1), events.Weight)
+    histograms['Trackster_ClusterCleaned_relIsolation'] = Get_hist([20, 0.0, 1.0],  ak.sum(Trackster_ClusterCleaned.pt, axis = -1)/events.Pho.pt, events.Weight)
+
+    scanHistograms['Trackster_ClusterCleaned_relIsolation_scan_dr'] = OrderedDict()
+    for dr_ in np.linspace(0.05, 0.3, 6):
+      skimmedTrackster_ClusterCleaned = Trackster_ClusterCleaned[Trackster_ClusterCleaned.dr < dr_]
+      scanHistograms['Trackster_ClusterCleaned_relIsolation_scan_dr'][dr_] = Get_hist([20, 0.0, 1.0],  ak.sum(skimmedTrackster_ClusterCleaned.pt, axis = -1)/events.Pho.pt, events.Weight)
+
+
+    histograms2D['Trackster_ClusterCleaned_Count_v_Pho_pt'] = Get_hist2D([10, -0.5, 9.5], [10, 15, 50], ak.num(Trackster_ClusterCleaned.pt), events.Pho.pt)
+    histograms2D['Trackster_ClusterCleaned_dr_v_Trackster_ClusterCleaned_pt'] = Get_hist2D([20, 0, 0.3], [20, 0, 5], ak.flatten(Trackster_ClusterCleaned.dr), ak.flatten(Trackster_ClusterCleaned.pt))
+    histograms2D['Trackster_ClusterCleaned_dr_v_Trackster_ClusterCleaned_pt_ratio'] = Get_hist2D([20, 0, 0.3], [20, 0.0, 0.3], ak.flatten(Trackster_ClusterCleaned.dr), ak.flatten(Trackster_ClusterCleaned.pt_ratio))
+    histograms2D['Trackster_ClusterCleaned_dr_v_Trackster_ClusterCleaned_Time'] = Get_hist2D([20, 0, 0.3], [20, 0, 0.2], ak.flatten(Trackster_ClusterCleaned.dr), abs(ak.flatten(Trackster_ClusterCleaned.Time - ak.unflatten(PV.Time, counts = 1))))
+    histograms2D['Trackster_ClusterCleaned_dr_v_Trackster_ClusterCleaned_HGCsigTime'] = Get_hist2D([20, 0, 0.3], [20, 0, 0.2], ak.flatten(Trackster_ClusterCleaned.dr), abs(ak.flatten(Trackster_ClusterCleaned.Time - Trackster_ClusterCleaned.seedTime)))
+
+    histograms['clusterTrackster_pt'] = Get_hist([20, 0, 20], ak.flatten(clusterTrackster.pt), ak.flatten(clusterTrackster.weight))
+    histograms['clusterTrackster_dr'] = Get_hist([20, 0, 0.3],ak.flatten(clusterTrackster.dr), ak.flatten(clusterTrackster.weight))
+    histograms['clusterTrackster_Time'] = Get_hist([20, 0, 0.3], ak.flatten(clusterTrackster.Time - ak.unflatten(PV.Time, counts = 1)), ak.flatten(clusterTrackster.weight))
+    histograms['clusterTrackster_pt_ratio'] = Get_hist([50, 0., 1.0], ak.flatten(clusterTrackster.pt_ratio), ak.flatten(clusterTrackster.weight))
+    histograms['clusterTrackster_Count'] = Get_hist([10, -0.5, 9.5], ak.num(clusterTrackster.pt), events.Weight)
+    histograms['clusterTrackster_match_rate'] = Get_hist([10, 0, 0.5], ak.num(clusterTrackster.pt[clusterTrackster.Trackpt > 0])/ak.num(clusterTrackster.pt), events.Weight)
+
+
+
+
 
     RecHit     = events.HGCRecHit
     RecHit["weight"] = ak.broadcast_arrays(events["Weight"], RecHit.energy)[0]
@@ -324,6 +369,44 @@ def analysis(region, config):
     'NonPromptPhoton_noPU': [os.path.join(input_path, 'QCDEM_noPU', 'QCDEM_noPU.root')]
   }
 
+  process = ['SinglePhoton2To200', 'QCDEM']
+  PU      = ['', '_noPU']
+
+  Kinematics  = dict()
+  Kinematics_Weight = dict()
+  for pileup in PU:
+    for process_ in process:
+      process_name = process_ + pileup
+      events = NanoEventsFactory.from_root(
+        os.path.join(input_path, process_name, process_name + ".root"),
+        schemaclass = BaseSchema,
+        treepath = "ntuplizer/tree"
+      ).events()
+
+      events = events[events.Pho_pt > 10]
+      dists = (
+        hist.Hist.new
+        .Reg(100, 0, 200, name = "pt")
+        .Reg(16, -3, 3,   name = "eta")
+        .Weight()
+        .fill(
+          pt = events["Pho_pt"],
+          eta = events["Pho_eta"]
+        )
+      )
+      Kinematics[process_name] = dists
+
+    num = Kinematics['QCDEM'+pileup][:, :].values()
+    den = Kinematics["SinglePhoton2To200"+pileup][:, :].values()
+    sf  = np.where(
+            (den > 0),
+            num / np.maximum(den, 1) * den.sum() / num.sum(),
+            1.0,
+          )
+    corr = dense_lookup(sf, [ax.edges for ax in Kinematics['QCDEM'+pileup].axes[:]])
+    Kinematics_Weight[pileup] = corr
+
+
   run = processor.Runner(
     executor = processor.FuturesExecutor(compression=None, workers=4),
     schema=NanoAODSchema,
@@ -334,7 +417,7 @@ def analysis(region, config):
   output = run(
              dataset,
              "ntuplizer/tree",
-             processor_instance = Accumulator()
+             processor_instance = Accumulator(Kinematics_Weight)
            )
 
   Comparison = []

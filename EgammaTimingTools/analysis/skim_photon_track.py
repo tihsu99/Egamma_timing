@@ -401,6 +401,16 @@ def produce_ntuple(config):
     events['TracksterIsolation_TimeWrtSig{}'.format(time_str)]    = ak.sum(Trackster_TimeWrtSig_selected.pt, axis = -1)
     events['TracksterIsolation_TimeWrtPV{}'.format(time_str)]     = ak.sum(Trackster_TimeWrtPV_selected.pt,  axis = -1)
 
+  # TracksterIsolation without all tracksters relevant to cluster.
+  for time_cut in time_cut_candidate:
+    general_cut = ((~Trackster.inCluster) & (Trackster.dr < 0.15)) & (Trackster.pt > 1)
+    Trackster_TimeWrtSig_selected = Trackster[(Trackster["TimeWrtSig"] < time_cut) & general_cut]
+    Trackster_TimeWrtPV_selected  = Trackster[(Trackster["TimeWrtPV"]  < time_cut) & general_cut]
+    time_str = ("%.2f"%time_cut).replace(".", "p")
+    events['TracksterIsolation_ClusterCleaned_TimeWrtSig{}'.format(time_str)]    = ak.sum(Trackster_TimeWrtSig_selected.pt, axis = -1)
+    events['TracksterIsolation_ClusterCleaned_TimeWrtPV{}'.format(time_str)]     = ak.sum(Trackster_TimeWrtPV_selected.pt,  axis = -1)
+
+
   # HGCRecHitIsolation
   for time_cut in time_cut_candidate:
     general_cut = (~RecHit.isSeed) & (RecHit.dr < 0.15)
@@ -410,6 +420,16 @@ def produce_ntuple(config):
       time_str = ("%.2f"%time_cut).replace(".","p")
       events['RecHitIsolation_TimeWrtSig{}_layer{}'.format(time_str, layer)] = ak.sum(RecHit_TimeWrtSig_selected.energy, axis = -1)
       events['RecHitIsolation_TimeWrtPV{}_layer{}'.format(time_str, layer)] = ak.sum(RecHit_TimeWrtPV_selected.energy, axis = -1)
+
+  # HGCRecHitIsolation without all hits relevant to SC.
+  for time_cut in time_cut_candidate:
+    general_cut = (~RecHit.inCluster) & (RecHit.dr < 0.15)
+    for layer in range(31):
+      RecHit_TimeWrtSig_selected = RecHit[general_cut & (RecHit["TimeWrtSig"] < time_cut) & (RecHit.layer == layer)]
+      RecHit_TimeWrtPV_selected  = RecHit[general_cut & (RecHit["TimeWrtPV"] < time_cut)  & (RecHit.layer == layer)]
+      time_str = ("%.2f"%time_cut).replace(".","p")
+      events['RecHitIsolation_ClusterCleaned_TimeWrtSig{}_layer{}'.format(time_str, layer)] = ak.sum(RecHit_TimeWrtSig_selected.energy, axis = -1)
+      events['RecHitIsolation_ClusterCleaned_TimeWrtPV{}_layer{}'.format(time_str, layer)] = ak.sum(RecHit_TimeWrtPV_selected.energy, axis = -1)
 
   events["Trackster"] = Trackster
   events["HGCRecHit"] = RecHit

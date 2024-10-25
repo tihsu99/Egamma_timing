@@ -17,6 +17,14 @@
 #include "RecoEgamma/EgammaIsolationAlgos/interface/EgammaTrackSelector.h"
 #include "DataFormats/HGCalReco/interface/Trackster.h"
 #include "DataFormats/GeometryVector/interface/PV3DBase.h"
+#include "DataFormats/HGCRecHit/interface/HGCRecHitCollections.h"
+#include "RecoLocalCalo/HGCalRecAlgos/interface/RecHitTools.h"
+#include "DataFormats/CaloRecHit/interface/CaloClusterFwd.h"
+
+#include "FWCore/Utilities/interface/ESGetToken.h"
+#include "FWCore/ParameterSet/interface/ConfigurationDescriptions.h"
+#include "Geometry/CaloGeometry/interface/CaloGeometry.h"
+#include "Geometry/Records/interface/CaloGeometryRecord.h"
 
 #include <Math/VectorUtil.h>
 #include <TTree.h>
@@ -84,6 +92,19 @@ private:
   std::vector<double> Trackster_Trackpt_;
   std::vector<double> Trackster_Tracketa_;
   std::vector<double> Trackster_Trackphi_;
+  std::vector<bool>   Trackster_isSeed_;
+  std::vector<bool>   Trackster_inCluster_;
+
+  std::vector<double> RecHit_dr_;
+  std::vector<double> RecHit_eta_;
+  std::vector<double> RecHit_phi_;
+  std::vector<int>    RecHit_layer_;
+  std::vector<double> RecHit_energy_;
+  std::vector<double> RecHit_time_;
+  std::vector<double> RecHit_time_error_;
+  std::vector<bool>   RecHit_isSeeded_;
+  std::vector<bool>   RecHit_inCluster_;
+
 
   // Tokens
   const edm::EDGetTokenT<reco::GsfElectronCollection> electronProducer_;
@@ -95,10 +116,18 @@ private:
   edm::EDGetTokenT<std::vector<ticl::Trackster>> tracksterToken_;
   edm::Handle<std::vector<ticl::Trackster>>  trackstersH_;
 
+  edm::EDGetTokenT<std::vector<reco::CaloCluster>> layer_cluster_Token_;
+  edm::Handle<std::vector<reco::CaloCluster>>      layer_cluster_Handle_;
+
+  const edm::EDGetTokenT<HGCRecHitCollection> hitsEE_;
+  const edm::EDGetTokenT<HGCRecHitCollection> hitsFH_;
+  const edm::EDGetTokenT<HGCRecHitCollection> hitsBH_;
+
   const edm::EDGetTokenT<edm::ValueMap<float>> mtdt0_H;
   const edm::EDGetTokenT<edm::ValueMap<float>> mtdSigmat0_H;
   const edm::EDGetTokenT<edm::ValueMap<float>> mtdTrkQualMVA_H;
 
+  const edm::ESGetToken<CaloGeometry, CaloGeometryRecord> caloGeometryToken_;
 
   // Cut Value
   const double ptMin_;
@@ -117,6 +146,8 @@ private:
 // Other
   bool   isMC_;
   double matchedToGenEle_;
+  hgcal::RecHitTools recHitTools_;
+
   TTree* tree_;
 };
 
@@ -127,9 +158,14 @@ TrackerNtuplizer::TrackerNtuplizer(const edm::ParameterSet& config)
     vertexProducer_{consumes(config.getParameter<edm::InputTag>("vertexProducer"))},
     genParticleProducer_{consumes<edm::View<reco::GenParticle>>(config.getParameter<edm::InputTag>("genParticles"))},
     tracksterToken_{consumes(config.getParameter<edm::InputTag>("tracksterSrc"))},
+    layer_cluster_Token_{consumes(config.getParameter<edm::InputTag>("LayerClusterSrc"))},
+    hitsEE_{consumes(config.getParameter<edm::InputTag>("RecHitsEE_Src"))},
+    hitsFH_{consumes(config.getParameter<edm::InputTag>("RecHitsFH_Src"))},
+    hitsBH_{consumes(config.getParameter<edm::InputTag>("RecHitsBH_Src"))},
     mtdt0_H{consumes(config.getParameter<edm::InputTag>("mtdt0"))},
     mtdSigmat0_H{consumes(config.getParameter<edm::InputTag>("mtdSigmat0"))},
-    mtdTrkQualMVA_H{consumes(config.getParameter<edm::InputTag>("mtdTrkQualMVA"))},    
+    mtdTrkQualMVA_H{consumes(config.getParameter<edm::InputTag>("mtdTrkQualMVA"))},   
+    caloGeometryToken_(esConsumes()),
     ptMin_{config.getParameter<double>("ptMin")},
     intRadiusBarrel_{config.getParameter<double>("intRadiusBarrel")},
     intRadiusEndcap_{config.getParameter<double>("intRadiusEndcap")},
@@ -168,7 +204,10 @@ TrackerNtuplizer::TrackerNtuplizer(const edm::ParameterSet& config)
   tree_->Branch("Track_MtdMva", &Track_MtdMva_);
   tree_->Branch("Track_dz", &Track_dz_);
   tree_->Branch("Track_dxy", &Track_dxy_);
+
   tree_->Branch("Trackster_dr", &Trackster_dr_);
+  tree_->Branch("Trackster_isSeed", &Trackster_isSeed_);
+  tree_->Branch("Trackster_inCluster", &Trackster_inCluster_);
   tree_->Branch("Trackster_pt", &Trackster_pt_);
   tree_->Branch("Trackster_eta", &Trackster_eta_);
   tree_->Branch("Trackster_phi", &Trackster_phi_);
@@ -178,6 +217,16 @@ TrackerNtuplizer::TrackerNtuplizer(const edm::ParameterSet& config)
   tree_->Branch("Trackster_Trackpt",  &Trackster_Trackpt_);
   tree_->Branch("Trackster_Tracketa", &Trackster_Tracketa_);
   tree_->Branch("Trackster_Trackphi", &Trackster_Trackphi_);
+
+  tree_->Branch("HGCRecHit_dr",  &RecHit_dr_);
+  tree_->Branch("HGCRecHit_eta", &RecHit_eta_);
+  tree_->Branch("HGCRecHit_phi", &RecHit_phi_);
+  tree_->Branch("HGCRecHit_layer", &RecHit_layer_);
+  tree_->Branch("HGCRecHit_energy", &RecHit_energy_);
+  tree_->Branch("HGCRecHit_Time",   &RecHit_time_);
+  tree_->Branch("HGCRecHit_TimeError", &RecHit_time_error_);
+  tree_->Branch("HGCRecHit_isSeed", &RecHit_isSeeded_);
+  tree_->Branch("HGCRecHit_inCluster", &RecHit_inCluster_);
 }
 
 void TrackerNtuplizer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup){
@@ -185,6 +234,9 @@ void TrackerNtuplizer::analyze(const edm::Event& iEvent, const edm::EventSetup& 
   nEvent_ = iEvent.id().event();
   nRun_   = iEvent.id().run();
   nLumi_  = iEvent.id().luminosityBlock();
+
+  auto const& caloGeometry = iSetup.getData(caloGeometryToken_);
+  recHitTools_.setGeometry(caloGeometry);
 
   auto electronHandle = iEvent.getHandle(electronProducer_);
   auto vertexHandle   = iEvent.getHandle(vertexProducer_);
@@ -199,6 +251,10 @@ void TrackerNtuplizer::analyze(const edm::Event& iEvent, const edm::EventSetup& 
 
   const reco::TrackCollection *trackCollection_ = (trackHandle.product());
   const edm::Handle <reco::TrackCollection> trackCollectionH_ = trackHandle;
+
+  const edm::Handle<HGCRecHitCollection> hitsEE_Handle_ = iEvent.getHandle(hitsEE_);
+  const edm::Handle<HGCRecHitCollection> hitsFH_Handle_ = iEvent.getHandle(hitsFH_);
+  const edm::Handle<HGCRecHitCollection> hitsBH_Handle_ = iEvent.getHandle(hitsBH_);
 
 
   std::vector <reco::Vertex> vertices = *vertexHandle;
@@ -224,6 +280,11 @@ void TrackerNtuplizer::analyze(const edm::Event& iEvent, const edm::EventSetup& 
 
     // Get Gsf Electron track
     const reco::GsfElectron* electron = &(electronHandle->at(i));
+
+    const reco::CaloClusterPtr& electron_seed = electron->superCluster()->seed();
+    const reco::CaloClusterPtrVector& electron_clusters = electron->superCluster()->clusters();
+    const std::vector<std::pair<DetId, float>>& seedHitsAndFractions = electron_seed->hitsAndFractions();
+
     const reco::Track* tmpTrack = &(*(electron->gsfTrack()));
     math::XYZVector tmpElectronMomentumAtVtx = (*tmpTrack).momentum();
     double tmpElectronEtaAtVertex = (*tmpTrack).eta();
@@ -342,6 +403,9 @@ void TrackerNtuplizer::analyze(const edm::Event& iEvent, const edm::EventSetup& 
     iEvent.getByToken(tracksterToken_, trackstersH_);
     const auto& tracksters = *trackstersH_;
 
+    iEvent.getByToken(layer_cluster_Token_, layer_cluster_Handle_);
+    const auto& layerClusters = *layer_cluster_Handle_.product();
+
     // Find signal tracksters
 
     int sigTracksterIdx = -1;
@@ -350,6 +414,8 @@ void TrackerNtuplizer::analyze(const edm::Event& iEvent, const edm::EventSetup& 
     Trackster_eta_.clear();
     Trackster_phi_.clear();
     Trackster_dr_.clear();
+    Trackster_isSeed_.clear();
+    Trackster_inCluster_.clear();
     Trackster_Time_.clear();
     Trackster_TimeErr_.clear();
     Trackster_TrackIdx_.clear();
@@ -383,7 +449,104 @@ void TrackerNtuplizer::analyze(const edm::Event& iEvent, const edm::EventSetup& 
         Trackster_Tracketa_.push_back(-1);
         Trackster_Trackphi_.push_back(-1);
       }
+      // Check if trackster is seeded or not.
+      bool isSeedTrackster = false;
+      bool Trackster_inCluster = false;
+
+      for (const auto lcId : tst.vertices()){
+        if (isSeedTrackster && Trackster_inCluster) break;
+        const std::vector<std::pair<DetId, float>>& hit_and_fractions = layerClusters[lcId].hitsAndFractions();
+
+        for(unsigned int seedhitId = 0; seedhitId < seedHitsAndFractions.size(); seedhitId++){
+          if (isSeedTrackster) break;
+          const auto seed_detId = seedHitsAndFractions[seedhitId].first;
+          const auto seed_fraction = seedHitsAndFractions[seedhitId].second;
+          for(unsigned int hitId = 0; hitId < hit_and_fractions.size(); hitId ++){
+            if (isSeedTrackster) break;
+            const auto hit_detId = hit_and_fractions[hitId].first;
+            const auto hit_fraction = hit_and_fractions[hitId].second;
+            if(hit_detId == seed_detId) isSeedTrackster = true;
+          }
+        }
+
+        for (reco::CaloClusterPtrVector::const_iterator bcit = electron_clusters.begin(); bcit != electron_clusters.end(); ++bcit){
+          if(Trackster_inCluster) break;
+          const std::vector<std::pair<DetId, float>>& clusterHitsAndFractions = (*bcit)->hitsAndFractions();
+          for(unsigned int cluster_hitId = 0; cluster_hitId < clusterHitsAndFractions.size(); cluster_hitId++){
+            if(Trackster_inCluster) break;
+            for(unsigned int hitId = 0; hitId < hit_and_fractions.size(); hitId ++){
+              if (Trackster_inCluster) break;
+              const auto hit_detId = hit_and_fractions[hitId].first;
+              const auto hit_fraction = hit_and_fractions[hitId].second;
+              if(hit_detId == clusterHitsAndFractions[cluster_hitId].first) Trackster_inCluster = true;
+            }
+          }
+        }
+      }
+      Trackster_isSeed_.push_back(isSeedTrackster);
+      Trackster_inCluster_.push_back(Trackster_inCluster);
     }
+
+    auto checkAndFill = [this, &seedHitsAndFractions, &electron_clusters](const HGCRecHit& hit){
+
+      const GlobalPoint position = recHitTools_.getPosition(hit.id());
+      float eta = recHitTools_.getEta(position, 0);
+      float phi = recHitTools_.getPhi(position);
+      float deltar = reco::deltaR(Ele_eta_, Ele_phi_, eta, phi);
+      bool isBarrel = std::abs(Ele_eta_) < 1.479;
+      double intRadius = isBarrel ? intRadiusBarrel_ : intRadiusEndcap_;
+      if (deltar < extRadius_){
+
+        bool isSeeded = false;
+        bool inCluster = false;
+        for(unsigned int seedhitId = 0; seedhitId < seedHitsAndFractions.size(); seedhitId++){
+           if (isSeeded) break;
+           if(seedHitsAndFractions[seedhitId].first == hit.id()) isSeeded = true;
+        }
+        int layer = recHitTools_.getLayerWithOffset(hit.id());
+
+        for (reco::CaloClusterPtrVector::const_iterator bcit = electron_clusters.begin(); bcit != electron_clusters.end(); ++bcit){
+          if(inCluster) break;
+          const std::vector<std::pair<DetId, float>>& clusterHitsAndFractions = (*bcit)->hitsAndFractions();
+          for(unsigned int hitId = 0; hitId < clusterHitsAndFractions.size(); hitId++){
+            if (inCluster) break;
+            if(clusterHitsAndFractions[hitId].first == hit.id()) inCluster = true;
+          }
+        }
+
+        RecHit_dr_.push_back(deltar);
+        RecHit_eta_.push_back(eta);
+        RecHit_phi_.push_back(phi);
+        RecHit_layer_.push_back(layer);
+        RecHit_energy_.push_back(hit.energy());
+        RecHit_time_.push_back(hit.time());
+        RecHit_time_error_.push_back(hit.timeError());
+        RecHit_isSeeded_.push_back(isSeeded);
+        RecHit_inCluster_.push_back(inCluster);
+      }
+    };
+
+
+    RecHit_dr_.clear();
+    RecHit_eta_.clear();
+    RecHit_phi_.clear();
+    RecHit_layer_.clear();
+    RecHit_energy_.clear();
+    RecHit_time_.clear();
+    RecHit_time_error_.clear();
+    RecHit_isSeeded_.clear();
+    RecHit_inCluster_.clear();
+
+    for (const auto& hit : *hitsEE_Handle_){
+      checkAndFill(hit);
+    }
+    for (const auto& hit : *hitsFH_Handle_){
+      checkAndFill(hit);
+    }
+    for (const auto& hit : *hitsBH_Handle_){
+      checkAndFill(hit);
+    }
+
 
     tree_->Fill();
   }
