@@ -190,9 +190,10 @@ class Accumulator(processor.ProcessorABC):
   def process(self, events):
 
     histograms  = dict()
+    pt_cut = 10
 
     dataset     = events.metadata['dataset']
-    events = events[events.Pho.pt > 10]
+    events = events[events.Pho.pt > pt_cut]
     if 'NonPrompt' in dataset:
       events = events[~(events['matchedToGenPho'] == 1)]
     else:
@@ -203,7 +204,7 @@ class Accumulator(processor.ProcessorABC):
 
 
     histograms['Count']    = Get_hist([1,-0.5,0.5], ak.from_numpy(np.zeros(len(events))), events["weight"])
-    Isolation_bin = [400,-0.1,50]
+    Isolation_bin = [1600,-0.1,800]
 
     time_cut_candidate = [0.04 * (i+1) for i in range(5)]
     time_cut_candidate.append(999.0)
@@ -231,6 +232,22 @@ class Accumulator(processor.ProcessorABC):
       histograms['HGCIsolation_TimeWrtSig{}'.format(time_str)] = Get_hist(Isolation_bin, events['HGCIsolation_TimeWrtSig{}'.format(time_str)], events.weight)
       histograms['HGCIsolation_ClusterCleaned_TimeWrtSig{}'.format(time_str)] = Get_hist(Isolation_bin, events['HGCIsolation_ClusterCleaned_TimeWrtSig{}'.format(time_str)], events.weight)
 
+    Isolation_bin = [800,-0.1,4.0]
+    for time_cut in time_cut_candidate:
+      time_str = ("%.2f"%time_cut).replace(".","p")
+      histograms['relTracksterIsolation_TimeWrtSig{}'.format(time_str)] = Get_hist(Isolation_bin, events.TracksterIsolation["TimeWrtSig{}".format(time_str)]/events.Pho.pt, events.weight)
+      histograms['relTracksterIsolation_ClusterCleaned_TimeWrtSig{}'.format(time_str)] = Get_hist(Isolation_bin, events.TracksterIsolation["ClusterCleaned_TimeWrtSig{}".format(time_str)]/events.Pho.pt, events.weight)
+
+      for ring_ in range(5):
+        for sublayer_ in range(6):
+          layer_ = ring_ * 6 + sublayer_
+        histograms['relHGCIsolationRing{}_TimeWrtSig{}'.format(ring_, time_str)] = Get_hist(Isolation_bin, events['HGCIsolationRing{}_TimeWrtSig{}'.format(ring_, time_str)]/events.Pho.pt, events.weight)
+        histograms['relHGCIsolationRing{}_ClusterCleaned_TimeWrtSig{}'.format(ring_, time_str)] = Get_hist(Isolation_bin, events['HGCIsolationRing{}_ClusterCleaned_TimeWrtSig{}'.format(ring_, time_str)]/events.Pho.pt, events.weight)
+
+      histograms['relHGCIsolation_TimeWrtSig{}'.format(time_str)] = Get_hist(Isolation_bin, events['HGCIsolation_TimeWrtSig{}'.format(time_str)]/events.Pho.pt, events.weight)
+      histograms['relHGCIsolation_ClusterCleaned_TimeWrtSig{}'.format(time_str)] = Get_hist(Isolation_bin, events['HGCIsolation_ClusterCleaned_TimeWrtSig{}'.format(time_str)]/events.Pho.pt, events.weight)
+
+
     return{
       dataset: {
         'Histogram': histograms,
@@ -247,15 +264,16 @@ def analysis(region, config):
   CheckDir(input_path)
   CheckDir(store_path)
 
+  pt_cut = 10
   dataset = {
     'PromptPhoton': [os.path.join(input_path, 'SinglePhoton2To200', 'SinglePhoton2To200.root')],
-    'PromptPhoton_noPU': [os.path.join(input_path, 'SinglePhoton2To200_noPU', 'SinglePhoton2To200_noPU.root')],
+#    'PromptPhoton_noPU': [os.path.join(input_path, 'SinglePhoton2To200_noPU', 'SinglePhoton2To200_noPU.root')],
     'NonPromptPhoton': [os.path.join(input_path, 'QCDEM', 'QCDEM.root')],
-    'NonPromptPhoton_noPU': [os.path.join(input_path, 'QCDEM_noPU', 'QCDEM_noPU.root')]
+#    'NonPromptPhoton_noPU': [os.path.join(input_path, 'QCDEM_noPU', 'QCDEM_noPU.root')]
   }
 
   process = ['SinglePhoton2To200', 'QCDEM']
-  PU      = ['', '_noPU']
+  PU      = ['']
 
   Kinematics  = dict()
   Kinematics_Weight = dict()
@@ -268,7 +286,12 @@ def analysis(region, config):
         treepath = "ntuplizer/tree"
       ).events()
 
-      events = events[events.Pho_pt > 10]
+      events = events[events.Pho_pt > pt_cut]
+      if process_ == 'QCDEM':
+        events = events[~(events['matchedToGenPho'] == 1)]
+      else:
+        events = events[(events['matchedToGenPho'] == 1)]
+
       dists = (
         hist.Hist.new
         .Reg(100, 0, 200, name = "pt")
@@ -320,9 +343,10 @@ def analysis(region, config):
     PU_data[variable_] = calculate_roc_auc(output['PromptPhoton']['Histogram'][variable_], output['NonPromptPhoton']['Histogram'][variable_], 0.95)
 
   time_cut_candidate = [0.04 * (i+1) for i in range(5)]
-  target_variable = [['TracksterIsolation_TimeWrtSig', 'TracksterIsolation_ClusterCleaned_TimeWrtSig'], ['HGCIsolation_TimeWrtSig', 'HGCIsolation_ClusterCleaned_TimeWrtSig']]
+  target_variable = [['TracksterIsolation_TimeWrtSig', 'TracksterIsolation_ClusterCleaned_TimeWrtSig'], ['HGCIsolation_TimeWrtSig', 'HGCIsolation_ClusterCleaned_TimeWrtSig'], ['relTracksterIsolation_TimeWrtSig', 'relTracksterIsolation_ClusterCleaned_TimeWrtSig'], ['relHGCIsolation_TimeWrtSig', 'relHGCIsolation_ClusterCleaned_TimeWrtSig']]
   for ring_ in range(5):
     target_variable.append(['HGCIsolationRing{}_TimeWrtSig'.format(ring_), 'HGCIsolationRing{}_ClusterCleaned_TimeWrtSig'.format(ring_)])
+    target_variable.append(['relHGCIsolationRing{}_TimeWrtSig'.format(ring_), 'relHGCIsolationRing{}_ClusterCleaned_TimeWrtSig'.format(ring_)])
 
   for target_ in target_variable:
     for plot_variable_ in ['auc', 'Eff(bkg)@0.95sig', 'ROC']:

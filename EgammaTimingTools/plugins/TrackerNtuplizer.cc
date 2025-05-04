@@ -218,15 +218,15 @@ TrackerNtuplizer::TrackerNtuplizer(const edm::ParameterSet& config)
   tree_->Branch("Trackster_Tracketa", &Trackster_Tracketa_);
   tree_->Branch("Trackster_Trackphi", &Trackster_Trackphi_);
 
-  tree_->Branch("HGCRecHit_dr",  &RecHit_dr_);
-  tree_->Branch("HGCRecHit_eta", &RecHit_eta_);
-  tree_->Branch("HGCRecHit_phi", &RecHit_phi_);
-  tree_->Branch("HGCRecHit_layer", &RecHit_layer_);
-  tree_->Branch("HGCRecHit_energy", &RecHit_energy_);
-  tree_->Branch("HGCRecHit_Time",   &RecHit_time_);
-  tree_->Branch("HGCRecHit_TimeError", &RecHit_time_error_);
-  tree_->Branch("HGCRecHit_isSeed", &RecHit_isSeeded_);
-  tree_->Branch("HGCRecHit_inCluster", &RecHit_inCluster_);
+//  tree_->Branch("HGCRecHit_dr",  &RecHit_dr_);
+//  tree_->Branch("HGCRecHit_eta", &RecHit_eta_);
+//  tree_->Branch("HGCRecHit_phi", &RecHit_phi_);
+//  tree_->Branch("HGCRecHit_layer", &RecHit_layer_);
+//  tree_->Branch("HGCRecHit_energy", &RecHit_energy_);
+//  tree_->Branch("HGCRecHit_Time",   &RecHit_time_);
+//  tree_->Branch("HGCRecHit_TimeError", &RecHit_time_error_);
+//  tree_->Branch("HGCRecHit_isSeed", &RecHit_isSeeded_);
+//  tree_->Branch("HGCRecHit_inCluster", &RecHit_inCluster_);
 }
 
 void TrackerNtuplizer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup){

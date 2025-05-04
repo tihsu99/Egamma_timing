@@ -368,6 +368,7 @@ def produce_ntuple(config):
         treepath = "ntuplizer/tree"
       ).events()
 
+
   events = events[events.Pho.pt > 10]
   threshold = config.threshold
   group = np.where(np.random.rand(len(events)) > threshold, 1, 0)

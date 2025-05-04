@@ -364,13 +364,13 @@ def analysis(region, config):
 
   dataset = {
     'PromptPhoton': [os.path.join(input_path, 'SinglePhoton2To200', 'SinglePhoton2To200.root')],
-    'PromptPhoton_noPU': [os.path.join(input_path, 'SinglePhoton2To200_noPU', 'SinglePhoton2To200_noPU.root')],
+#    'PromptPhoton_noPU': [os.path.join(input_path, 'SinglePhoton2To200_noPU', 'SinglePhoton2To200_noPU.root')],
     'NonPromptPhoton': [os.path.join(input_path, 'QCDEM', 'QCDEM.root')],
-    'NonPromptPhoton_noPU': [os.path.join(input_path, 'QCDEM_noPU', 'QCDEM_noPU.root')]
+#    'NonPromptPhoton_noPU': [os.path.join(input_path, 'QCDEM_noPU', 'QCDEM_noPU.root')]
   }
 
   process = ['SinglePhoton2To200', 'QCDEM']
-  PU      = ['', '_noPU']
+  PU      = ['']
 
   Kinematics  = dict()
   Kinematics_Weight = dict()
@@ -384,6 +384,10 @@ def analysis(region, config):
       ).events()
 
       events = events[events.Pho_pt > 10]
+      if process_ == 'QCDEM':
+        events = events[~(events['matchedToGenPho'] == 1)]
+      else:
+        events = events[(events['matchedToGenPho'] == 1)]
       dists = (
         hist.Hist.new
         .Reg(100, 0, 200, name = "pt")
@@ -448,8 +452,8 @@ def produce_ntuple(region, config):
 
   CheckDir(store_path)
 
-  process = ['SinglePhoton2To200', 'QCD']
-  PU      = ['', '_noPU']
+  process = ['SinglePhoton2To200', 'QCDEM']
+  PU      = ['']
   for pileup in PU:
     Events  = dict()
     for process_ in process:

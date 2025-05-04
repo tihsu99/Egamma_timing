@@ -7,9 +7,7 @@ from Configuration.AlCa.GlobalTag import GlobalTag
 from Configuration.StandardSequences.Eras import eras
 process = cms.Process("ElectronMVANtuplizer", eras.Phase2C17I13M9)
 
-
-process.load("Configuration.Geometry.GeometryExtended2026D88_cff")
-process.load("Configuration.Geometry.GeometryExtended2026D88Reco_cff")
+process.load('Configuration.Geometry.GeometryExtended2026D110Reco_cff')
 process.load("FWCore.MessageService.MessageLogger_cfi")
 process.load("Configuration.StandardSequences.FrontierConditions_GlobalTag_cff")
 
