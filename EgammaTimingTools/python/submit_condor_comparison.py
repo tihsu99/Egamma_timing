@@ -198,7 +198,8 @@ def build_production_commands(config, args, particle, region, sample, variant, i
       "hlt_output": workflow_cfg.get("hlt_output", "step_hlt.root"),
       "reco_output": workflow_cfg.get("reco_output", "step_reco.root"),
       "reco_output_commands": workflow_cfg.get("reco_output_commands", ""),
-  }
+      "hlt_customise": workflow_cfg.get("hlt_customise", ""),
+      }
 
   commands = []
   for command in workflow_cfg["commands"]:
