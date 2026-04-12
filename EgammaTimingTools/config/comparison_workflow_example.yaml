@@ -52,7 +52,8 @@ workflow:
     process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltParticleFlowSuperClusterECALUnseeded_*_*');
     process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltParticleFlowSuperClusterHGCalFromTICLUnseeded_*_*');
     process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltTiclEGammaSuperClusterProducerUnseeded_*_*');
-    process.FEVTDEBUGHLToutput_step = cms.EndPath(process.hltEgammaHLTExtra * process.FEVTDEBUGHLToutput)
+    process.egammaExtra_step = cms.EndPath(process.hltEgammaHLTExtra);
+    process.schedule.append(process.egammaExtra_step)
   hlt_output: step_hlt.root
   reco_output: step_reco.root
   reco_output_commands: >-
