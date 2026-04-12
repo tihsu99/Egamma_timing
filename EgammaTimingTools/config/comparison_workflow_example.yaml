@@ -43,15 +43,15 @@ workflow:
   # Keep all heavy intermediates in $WORKDIR and copy out only the comparison ntuple.
   hlt_customise_commands: >-
     process.load('RecoEgamma.EgammaHLTProducers.hltEgammaHLTExtra_cfi');
-#    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltEgammaHLTExtra_*_*');
-#    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltEgammaCandidatesUnseeded_*_*');
-#    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltHGCalRecHit_*_*');
-#    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltMergeLayerClusters_*_*');
-#    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltTiclCandidate_*_*');
-#    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltTiclTrackstersCLUE3DHigh_*_*');
-#    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltParticleFlowSuperClusterECALUnseeded_*_*');
-#    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltParticleFlowSuperClusterHGCalFromTICLUnseeded_*_*');
-#    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltTiclEGammaSuperClusterProducerUnseeded_*_*');
+    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltEgammaHLTExtra_*_*');
+    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltEgammaCandidatesUnseeded_*_*');
+    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltHGCalRecHit_*_*');
+    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltMergeLayerClusters_*_*');
+    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltTiclCandidate_*_*');
+    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltTiclTrackstersCLUE3DHigh_*_*');
+    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltParticleFlowSuperClusterECALUnseeded_*_*');
+    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltParticleFlowSuperClusterHGCalFromTICLUnseeded_*_*');
+    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltTiclEGammaSuperClusterProducerUnseeded_*_*');
     process.egammaExtra_step = cms.EndPath(process.hltEgammaHLTExtra);
     process.schedule.append(process.egammaExtra_step)
   hlt_output: step_hlt.root
