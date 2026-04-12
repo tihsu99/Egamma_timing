@@ -208,6 +208,7 @@ def build_production_commands(config, args, particle, region, sample, variant, i
       "reco_output": workflow_cfg.get("reco_output", "step_reco.root"),
       "reco_output_commands": workflow_cfg.get("reco_output_commands", ""),
       "hlt_customise_commands": workflow_cfg.get("hlt_customise_commands", ""),
+      "step1_customise": workflow_cfg.get("step1_customise", "SLHCUpgradeSimulations/Configuration/aging.customise_aging_1000"),
       }
 
   commands = []
