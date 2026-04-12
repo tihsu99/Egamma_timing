@@ -2,6 +2,7 @@
 cmssw-dir: ../../CMSSW_X_Y_Z/src
 timing-dir: ..
 xrootd-host: root://se01.grid.nchc.org.tw//
+sample-config: comparison_samples_example.yaml
 
 variants:
   v4:
@@ -57,13 +58,3 @@ workflow:
       --python_filename reco_step.py
     - cmsRun reco_step.py
   ntuplizer_input: file:{workdir}/stepMINI.root
-
-samples:
-  electron:
-    endcap:
-      DY: /cms/store/user/tihsu/example/electron/DY
-      TT: /cms/store/user/tihsu/example/electron/TT
-  photon:
-    endcap:
-      SinglePhoton2To200: /cms/store/user/tihsu/example/photon/SinglePhoton2To200
-      QCDEM: /cms/store/user/tihsu/example/photon/QCDEM

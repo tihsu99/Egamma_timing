@@ -19,6 +19,10 @@ def resolve_path(path, base_dir):
   return os.path.abspath(os.path.join(base_dir, path))
 
 
+def run_command(command):
+  return subprocess.check_output(["bash", "-lc", command], text=True)
+
+
 def write_condor_header(condor, farm_dir, universe, job_flavour, proxy):
   condor.write("output = {}/job_common_$(Process).out\n".format(farm_dir))
   condor.write("error  = {}/job_common_$(Process).err\n".format(farm_dir))
@@ -46,16 +50,50 @@ def detect_storage(dataset_path, default_host):
   return None, dataset_path
 
 
+def is_das_dataset(sample_spec):
+  if not isinstance(sample_spec, str):
+    return False
+  if sample_spec.startswith("/cms/store") or sample_spec.startswith("root://"):
+    return False
+  parts = [part for part in sample_spec.split("/") if part]
+  return len(parts) == 3
+
+
+def normalize_sample_spec(sample_spec):
+  if isinstance(sample_spec, dict):
+    return sample_spec
+  if is_das_dataset(sample_spec):
+    return {"dataset": sample_spec}
+  return {"path": sample_spec}
+
+
+def resolve_das_files(dataset_name, dbs_instance, default_host):
+  query = "file dataset={} instance={}".format(dataset_name, dbs_instance)
+  output = run_command("dasgoclient --query '{}'".format(query))
+  host_prefix = default_host if default_host.endswith("//") else default_host + "//"
+  files = []
+  for line in output.splitlines():
+    line = line.strip()
+    if not line.endswith(".root"):
+      continue
+    if line.startswith("root://"):
+      files.append(line)
+    else:
+      files.append("{}{}".format(host_prefix, line))
+  files.sort()
+  return files
+
+
 def resolve_input_files(dataset_path, default_host):
   host, path = detect_storage(dataset_path, default_host)
   if host is None:
-    output = subprocess.check_output(["bash", "-lc", "ls {}".format(path)], text=True)
+    output = run_command("ls {}".format(path))
     files = [os.path.join(path, item) for item in output.splitlines() if item.endswith(".root")]
     files.sort()
     return files
 
   xrdfs_host = host if host.endswith("//") else host + "//"
-  output = subprocess.check_output(["bash", "-lc", "xrdfs {} ls {}".format(xrdfs_host, path)], text=True)
+  output = run_command("xrdfs {} ls {}".format(xrdfs_host, path))
   files = []
   for line in output.splitlines():
     if not line.endswith(".root"):
@@ -66,6 +104,16 @@ def resolve_input_files(dataset_path, default_host):
       files.append(line)
   files.sort()
   return files
+
+
+def resolve_sample_files(sample_spec, default_host):
+  sample_cfg = normalize_sample_spec(sample_spec)
+  if "dataset" in sample_cfg:
+    dbs_instance = sample_cfg.get("dbs_instance", "prod/global")
+    return resolve_das_files(sample_cfg["dataset"], dbs_instance, default_host)
+  if "path" in sample_cfg:
+    return resolve_input_files(sample_cfg["path"], default_host)
+  raise RuntimeError("Sample specification must contain either 'dataset' or 'path'")
 
 
 def replace_placeholders(template, values):
@@ -163,10 +211,10 @@ def submit_production_jobs(config, condor, farm_dir, args):
   created_jobs = 0
   for particle, particle_cfg in config["samples"].items():
     for region, sample_map in particle_cfg.items():
-      for sample, dataset_path in sample_map.items():
+      for sample, sample_spec in sample_map.items():
         if not accept_sample(args, particle, region, sample):
           continue
-        input_files = resolve_input_files(dataset_path, default_host)
+        input_files = resolve_sample_files(sample_spec, default_host)
         for variant in args.variant:
           variant_outdir = os.path.join(args.outdir, variant, particle, region, sample)
           check_dir(variant_outdir)
@@ -250,6 +298,7 @@ def submit_merge_jobs(config, condor, farm_dir, args):
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Prepare Condor jobs for comparison ntuple production and merge with /tmp staging")
   parser.add_argument("--config", required=True, type=str)
+  parser.add_argument("--sample-config", type=str, default=None)
   parser.add_argument("--mode", choices=["produce", "merge"], default="produce")
   parser.add_argument("--variant", nargs="+", choices=["v4", "v5"], default=["v4", "v5"])
   parser.add_argument("--farm", default="FarmComparison", type=str)
@@ -274,6 +323,13 @@ if __name__ == "__main__":
   config_dir = os.path.dirname(os.path.abspath(args.config))
   config["cmssw-dir"] = resolve_path(config["cmssw-dir"], config_dir)
   config["timing-dir"] = resolve_path(config.get("timing-dir", ".."), config_dir)
+  sample_config_path = args.sample_config or config.get("sample-config")
+  if sample_config_path is not None:
+    sample_config_path = resolve_path(sample_config_path, config_dir)
+    with open(sample_config_path) as handle:
+      config["samples"] = yaml.safe_load(handle)["samples"]
+  elif "samples" not in config:
+    raise RuntimeError("No samples found. Provide --sample-config or set sample-config/samples in the workflow config.")
 
   args.farm = os.path.abspath(args.farm)
   args.outdir = os.path.abspath(args.outdir)
