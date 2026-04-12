@@ -99,7 +99,7 @@ workflow:
       --geometry ExtendedRun4D110
       --era Phase2C17I13M9
       --eventcontent FEVTDEBUGHLT
-      --customise {step1_customise}
+      --customise "{step1_customise}"
       --customise_commands "{hlt_customise_commands}"
       {proc_modifier}
       --filein {input_file}
