@@ -16,6 +16,81 @@ from coffea.nanoevents.methods import vector
 import scipy.stats as stats
 from collections import OrderedDict
 from sklearn.metrics import auc
+from sklearn.metrics import roc_auc_score
+
+def draw_pt_vs_auc(inputs, time_str_list, prefix='TracksterIsolation_TimeWrtSig', plotdir = "./"):
+
+    for dataset, output in inputs.items():
+      if "NonPrompt" in dataset:
+        histograms_bkg = output["Histogram2D"]
+      else:
+        histograms_sig = output["Histogram2D"]
+
+
+
+    prefixes = {
+        "Seed-Cleaning": f"{prefix}_TimeWrtSig",
+        "Cluster-Cleaning": f"{prefix}_ClusterCleaned_TimeWrtSig"
+    }
+
+    plt.figure(figsize=(10, 7))
+
+    for label, prefix in prefixes.items():
+        linestyle = '-' if label == "Seed-Cleaning" else '--'
+        
+        for time_str in time_str_list:
+
+            if "999p0" in time_str:
+              linewidth = 3
+            else:
+              linewidth = 1
+            key = f"{prefix}{time_str}"
+
+
+            
+            hist2d_sig = histograms_sig.get(key)
+            hist2d_bkg = histograms_bkg.get(key)
+
+            print(key)
+
+            pt_bins = np.array(hist2d_sig.axes[0].edges)
+            isolation_bins = np.array(hist2d_sig.axes[1].edges)
+            pt_bin_centers = 0.5 * (pt_bins[:-1] + pt_bins[1:])
+
+            if hist2d_sig is None or hist2d_bkg is None:
+                print(f"Missing histogram for {key}")
+                continue
+
+            auc_values = []
+            for i in range(len(pt_bins) - 1):
+                proj_sig = hist2d_sig.values()[i, :]
+                proj_bkg = hist2d_bkg.values()[i, :]
+                if len(proj_sig) != len(isolation_bins) - 1 or len(proj_bkg) != len(isolation_bins) - 1:
+                    print(f"Shape mismatch for pt bin {i}")
+                    auc_values.append(np.nan)
+                    continue
+
+                x_vals = 0.5 * (isolation_bins[:-1] + isolation_bins[1:])
+                # Combine into one array
+                scores = np.concatenate([-1 * x_vals, -1 * x_vals])
+                labels = np.concatenate([np.ones_like(x_vals), np.zeros_like(x_vals)])
+                weights = np.concatenate([proj_sig, proj_bkg])  # use bin counts as weights
+
+                auc_val = roc_auc_score(labels, scores, sample_weight=weights)
+                auc_values.append(auc_val)
+
+            plt.plot(pt_bin_centers, auc_values, linestyle=linestyle, label=f'{label} - TimeWrtSig {time_str}', linewidth = linewidth)
+
+    plt.xlabel('Photon $p_T$ [GeV]')
+    plt.ylabel('ROC AUC (Signal vs Background)')
+    plt.title('AUC of Isolation vs $p_T$')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(f"{plotdir}/{prefix}_iso-pt.pdf")
+    plt.savefig(f"{plotdir}/{prefix}_iso-pt.png")
+    plt.show()
+
 
 def calculate_roc_auc(signal_histo, bkg_histo, signal_eff_threshold):
     """
@@ -66,8 +141,13 @@ def calculate_roc_auc(signal_histo, bkg_histo, signal_eff_threshold):
 
     return {"fpr": fpr,
             "tpr": tpr,
+            "fpr-raw": bkg_cumsum,
+            "tpr-raw": sig_cumsum,
+            "sig-sum": sig_cumsum[-1],
+            "bkg-sum": bkg_cumsum[-1],
             "auc": auc_value,
-            "Eff(bkg)@0.95sig": bkg_eff_at_threshold}
+            "Eff(bkg)@0.95sig": bkg_eff_at_threshold,
+            "edge": edges}
 
 def CheckDir(path):
   if not os.path.exists(path):
@@ -80,6 +160,16 @@ def Get_hist(bins, array, weight):
         .Weight()
         .fill(var = array, weight = weight)
       )
+    return hist_
+
+def Get_hist2D(xbins, ybins, xvals, yvals, weights):
+    hist_ = (
+        hist.Hist.new
+        .Reg(xbins[0], xbins[1], xbins[2], name='xvar')
+        .Reg(ybins[0], ybins[1], ybins[2], name='yvar')
+        .Weight()
+        .fill(xvar=xvals, yvar=yvals, weight=weights)
+    )
     return hist_
 
 def Draw_comparison(dataset_dict, histo_name, outputdir, fname, density = False,  logy=False, keyword = "Histogram", second_keyword = None):
@@ -129,6 +219,9 @@ def Draw_Trend(Data_Dict, InputVariable, PlotVariable, TimeSeries, baselinecut =
   x_second = []
   y_second = []
 
+  
+  baseline_time_cut = ("%.2f"%baselinecut).replace(".","p")
+
   plt.figure(figsize=(8, 6))
   for time_cut in TimeSeries:
       time_str = ("%.2f"%time_cut).replace(".","p")
@@ -136,6 +229,32 @@ def Draw_Trend(Data_Dict, InputVariable, PlotVariable, TimeSeries, baselinecut =
       if PlotVariable == "ROC":
         fpr, tpr = Dict['fpr'], Dict['tpr']
         plt.plot(fpr[::-1], tpr[::-1], label = '{}{}'.format(InputVariable, time_str))
+
+      elif PlotVariable == "Total_ROC":
+
+        fpr, tpr = Dict['fpr-raw'], Dict['tpr-raw']
+        sig_total, bkg_total = Data_Dict['{}{}'.format(InputVariable, baseline_time_cut)]["sig-sum"], Data_Dict['{}{}'.format(InputVariable, baseline_time_cut)]["bkg-sum"]
+
+        fpr = (fpr/bkg_total)[::-1]
+        tpr = (tpr/sig_total)[::-1]
+        plt.plot(fpr[::-1], tpr[::-1], label = '{}{}'.format(InputVariable, time_str))
+
+      elif PlotVariable == "Eff":
+        fpr, tpr, edges = Dict['fpr'], Dict['tpr'], Dict['edge']
+        # Compute bin centers for x-axis
+        bin_centers = 0.5 * (edges[1:] + edges[:-1])
+        iso_cut = bin_centers[::-1]  # Reverse to match TPR direction
+        plt.plot(iso_cut, tpr, label='{}{}'.format(InputVariable, time_str))
+
+
+      elif PlotVariable == "Eff-bkg":
+        fpr, tpr, edges = Dict['fpr'], Dict['tpr'], Dict['edge']
+        # Compute bin centers for x-axis
+        bin_centers = 0.5 * (edges[1:] + edges[:-1])
+        iso_cut = bin_centers[::-1]  # Reverse to match TPR direction
+        plt.plot(iso_cut, 1.0 - fpr, label='{}{}'.format(InputVariable, time_str))
+
+
       else:
         x.append(time_cut)
         y.append(Dict[PlotVariable])
@@ -145,6 +264,28 @@ def Draw_Trend(Data_Dict, InputVariable, PlotVariable, TimeSeries, baselinecut =
         if PlotVariable == "ROC":
           fpr, tpr = Dict['fpr'], Dict['tpr']
           plt.plot(fpr[::-1], tpr[::-1], '--', label = '{}{}'.format(second_InputVariable, time_str))
+        elif PlotVariable == "Total_ROC":
+          fpr, tpr = Dict['fpr-raw'], Dict['tpr-raw']
+          sig_total, bkg_total = Data_Dict['{}{}'.format(InputVariable, baseline_time_cut)]["sig-sum"], Data_Dict['{}{}'.format(InputVariable, baseline_time_cut)]["bkg-sum"]
+          fpr = (fpr/bkg_total)[::-1]
+          tpr = (tpr/sig_total)[::-1]
+          plt.plot(fpr[::-1], tpr[::-1], '--', label = '{}{}'.format(second_InputVariable, time_str))
+
+        elif PlotVariable == "Eff":
+          fpr, tpr, edges = Dict['fpr'], Dict['tpr'], Dict['edge']
+          # Compute bin centers for x-axis
+          bin_centers = 0.5 * (edges[1:] + edges[:-1])
+          iso_cut = bin_centers[::-1]  # Reverse to match TPR direction
+          plt.plot(iso_cut, tpr, '--', label='{}{}'.format(second_InputVariable, time_str))
+
+        elif PlotVariable == "Eff-bkg":
+          fpr, tpr, edges = Dict['fpr'], Dict['tpr'], Dict['edge']
+          # Compute bin centers for x-axis
+          bin_centers = 0.5 * (edges[1:] + edges[:-1])
+          iso_cut = bin_centers[::-1]  # Reverse to match TPR direction
+          plt.plot(iso_cut, 1.0 - fpr, '--', label='{}{}'.format(second_InputVariable, time_str))
+
+
         else:
           x_second.append(time_cut)
           y_second.append(Dict[PlotVariable])
@@ -168,6 +309,55 @@ def Draw_Trend(Data_Dict, InputVariable, PlotVariable, TimeSeries, baselinecut =
     plt.ylabel('signal efficiency')
     plt.title('ROC curve')
     plt.legend(loc='lower right')
+
+
+  elif PlotVariable == 'Total_ROC':
+    base_fpr, base_tpr = baseline['fpr'], baseline['tpr']
+    plt.plot(base_fpr[::-1], base_tpr[::-1], label = 'no Time Cut (Seed Cleaning)', linewidth = 3)
+    if second_InputVariable is not None:
+      base_fpr_second, base_tpr_second = baseline_second['fpr'], baseline_second['tpr']
+      plt.plot(base_fpr_second[::-1], base_tpr_second[::-1], '--', label = 'no Time Cut (Cluster Cleaning)', linewidth = 3)
+
+    plt.xlabel('background efficiency')
+    plt.ylabel('signal efficiency')
+    plt.title('ROC curve (Total)')
+    plt.legend(loc='lower right')
+
+  elif PlotVariable == 'Eff':
+    fpr, tpr, edges = baseline['fpr'], baseline['tpr'], baseline['edge']
+    # Compute bin centers for x-axis
+    bin_centers = 0.5 * (edges[1:] + edges[:-1])
+    iso_cut = bin_centers[::-1]  # Reverse to match TPR direction
+    plt.plot(iso_cut, tpr,  label = 'no Time Cut (Seed Cleaning)', linewidth = 3)
+    if second_InputVariable is not None:
+      base_fpr_second, base_tpr_second = baseline_second['fpr'], baseline_second['tpr']
+      plt.plot(iso_cut, base_tpr_second, '--', label = 'no Time Cut (Cluster Cleaning)', linewidth = 3)
+
+    plt.xlabel('isolation cut')
+    plt.ylabel('signal efficiency')
+    plt.title('Efficiency v.s. isolation cut')
+    plt.xscale('symlog', linthresh=1e-3)
+
+    plt.legend(loc='lower right')
+
+  elif PlotVariable == 'Eff-bkg':
+    fpr, tpr, edges = baseline['fpr'], baseline['tpr'], baseline['edge']
+    # Compute bin centers for x-axis
+    bin_centers = 0.5 * (edges[1:] + edges[:-1])
+    iso_cut = bin_centers[::-1]  # Reverse to match TPR direction
+    plt.plot(iso_cut, 1.0 - fpr,  label = 'no Time Cut (Seed Cleaning)', linewidth = 3)
+    if second_InputVariable is not None:
+      base_fpr_second, base_tpr_second = baseline_second['fpr'], baseline_second['tpr']
+      plt.plot(iso_cut, 1.0 - base_fpr_second, '--', label = 'no Time Cut (Cluster Cleaning)', linewidth = 3)
+
+    plt.xlabel('isolation cut')
+    plt.ylabel('background rejection rate')
+    plt.title('Rejection v.s. isolation cut')
+    plt.xscale('symlog', linthresh=1e-3)
+
+    plt.legend(loc='lower right')
+
+
   else:
     base_value = baseline[PlotVariable]
     plt.axhline(y = base_value, color = 'r', linestyle = '-', linewidth = 3, label = 'no Time Cut (Seed Cleaning)')
@@ -190,6 +380,7 @@ class Accumulator(processor.ProcessorABC):
   def process(self, events):
 
     histograms  = dict()
+    histograms_2D = dict()
     pt_cut = 10
 
     dataset     = events.metadata['dataset']
@@ -205,6 +396,7 @@ class Accumulator(processor.ProcessorABC):
 
     histograms['Count']    = Get_hist([1,-0.5,0.5], ak.from_numpy(np.zeros(len(events))), events["weight"])
     Isolation_bin = [1600,-0.1,800]
+    Pt_bin = [11, 0, 200]
 
     time_cut_candidate = [0.04 * (i+1) for i in range(5)]
     time_cut_candidate.append(999.0)
@@ -212,6 +404,10 @@ class Accumulator(processor.ProcessorABC):
       time_str = ("%.2f"%time_cut).replace(".","p")
       histograms['TracksterIsolation_TimeWrtSig{}'.format(time_str)] = Get_hist(Isolation_bin, events.TracksterIsolation["TimeWrtSig{}".format(time_str)], events.weight)
       histograms['TracksterIsolation_ClusterCleaned_TimeWrtSig{}'.format(time_str)] = Get_hist(Isolation_bin, events.TracksterIsolation["ClusterCleaned_TimeWrtSig{}".format(time_str)], events.weight)
+
+      histograms_2D[f'TracksterIsolation_TimeWrtSig{time_str}'] = Get_hist2D(Pt_bin, Isolation_bin, events.Pho.pt,  events.TracksterIsolation[f"TimeWrtSig{time_str}"], events.weight)
+      histograms_2D[f'TracksterIsolation_ClusterCleaned_TimeWrtSig{time_str}'] = Get_hist2D(Pt_bin, Isolation_bin, events.Pho.pt,  events.TracksterIsolation[f"ClusterCleaned_TimeWrtSig{time_str}"], events.weight)
+
 
       for ring_ in range(5):
         events['HGCIsolationRing{}_TimeWrtSig{}'.format(ring_, time_str)] = ak.zeros_like(events.weight)
@@ -224,6 +420,10 @@ class Accumulator(processor.ProcessorABC):
         histograms['HGCIsolationRing{}_TimeWrtSig{}'.format(ring_, time_str)] = Get_hist(Isolation_bin, events['HGCIsolationRing{}_TimeWrtSig{}'.format(ring_, time_str)], events.weight)
         histograms['HGCIsolationRing{}_ClusterCleaned_TimeWrtSig{}'.format(ring_, time_str)] = Get_hist(Isolation_bin, events['HGCIsolationRing{}_ClusterCleaned_TimeWrtSig{}'.format(ring_, time_str)], events.weight)
 
+        histograms_2D[f"HGCIsolationRing{ring_}_TimeWrtSig{time_str}"] = Get_hist2D(Pt_bin, Isolation_bin, events.Pho.pt, events['HGCIsolationRing{}_TimeWrtSig{}'.format(ring_, time_str)], events.weight)
+        histograms_2D[f"HGCIsolationRing{ring_}_ClusteredCleaned_TimeWrtSig{time_str}"] = Get_hist2D(Pt_bin, Isolation_bin, events.Pho.pt, events['HGCIsolationRing{}_ClusterCleaned_TimeWrtSig{}'.format(ring_, time_str)], events.weight)
+
+
       events['HGCIsolation_TimeWrtSig{}'.format(time_str)] = ak.zeros_like(events.weight)
       events['HGCIsolation_ClusterCleaned_TimeWrtSig{}'.format(time_str)] = ak.zeros_like(events.weight)
       for ring_ in range(5):
@@ -232,11 +432,20 @@ class Accumulator(processor.ProcessorABC):
       histograms['HGCIsolation_TimeWrtSig{}'.format(time_str)] = Get_hist(Isolation_bin, events['HGCIsolation_TimeWrtSig{}'.format(time_str)], events.weight)
       histograms['HGCIsolation_ClusterCleaned_TimeWrtSig{}'.format(time_str)] = Get_hist(Isolation_bin, events['HGCIsolation_ClusterCleaned_TimeWrtSig{}'.format(time_str)], events.weight)
 
+      histograms_2D[f"HGCIsolation_TimeWrtSig{time_str}"] = Get_hist2D(Pt_bin, Isolation_bin, events.Pho.pt, events['HGCIsolation_TimeWrtSig{}'.format(time_str)], events.weight)
+      histograms_2D[f"HGCIsolation_ClusterCleaned_TimeWrtSig{time_str}"] = Get_hist2D(Pt_bin, Isolation_bin, events.Pho.pt,  events['HGCIsolation_ClusterCleaned_TimeWrtSig{}'.format(time_str)], events.weight)
+
+
     Isolation_bin = [800,-0.1,4.0]
     for time_cut in time_cut_candidate:
       time_str = ("%.2f"%time_cut).replace(".","p")
       histograms['relTracksterIsolation_TimeWrtSig{}'.format(time_str)] = Get_hist(Isolation_bin, events.TracksterIsolation["TimeWrtSig{}".format(time_str)]/events.Pho.pt, events.weight)
       histograms['relTracksterIsolation_ClusterCleaned_TimeWrtSig{}'.format(time_str)] = Get_hist(Isolation_bin, events.TracksterIsolation["ClusterCleaned_TimeWrtSig{}".format(time_str)]/events.Pho.pt, events.weight)
+
+
+      histograms_2D[f"relTracksterIsolation_TimeWrtSig{time_str}"] = Get_hist2D(Pt_bin, Isolation_bin, events.Pho.pt, events.TracksterIsolation["TimeWrtSig{}".format(time_str)]/events.Pho.pt, events.weight)
+      histograms_2D[f"relTracksterIsolation_ClusterCleaned_TimeWrtSig{time_str}"] = Get_hist2D(Pt_bin, Isolation_bin, events.Pho.pt,  events.TracksterIsolation["ClusterCleaned_TimeWrtSig{}".format(time_str)]/events.Pho.pt, events.weight)
+
 
       for ring_ in range(5):
         for sublayer_ in range(6):
@@ -244,13 +453,19 @@ class Accumulator(processor.ProcessorABC):
         histograms['relHGCIsolationRing{}_TimeWrtSig{}'.format(ring_, time_str)] = Get_hist(Isolation_bin, events['HGCIsolationRing{}_TimeWrtSig{}'.format(ring_, time_str)]/events.Pho.pt, events.weight)
         histograms['relHGCIsolationRing{}_ClusterCleaned_TimeWrtSig{}'.format(ring_, time_str)] = Get_hist(Isolation_bin, events['HGCIsolationRing{}_ClusterCleaned_TimeWrtSig{}'.format(ring_, time_str)]/events.Pho.pt, events.weight)
 
+        histograms_2D['relHGCIsolationRing{}_TimeWrtSig{}'.format(ring_, time_str)] = Get_hist2D(Pt_bin, Isolation_bin, events.Pho.pt, events['HGCIsolationRing{}_TimeWrtSig{}'.format(ring_, time_str)]/events.Pho.pt, events.weight)
+        histograms_2D['relHGCIsolationRing{}_ClusterCleaned_TimeWrtSig{}'.format(ring_, time_str)] = Get_hist2D(Pt_bin, Isolation_bin, events.Pho.pt, events['HGCIsolationRing{}_ClusterCleaned_TimeWrtSig{}'.format(ring_, time_str)]/events.Pho.pt, events.weight)
+
       histograms['relHGCIsolation_TimeWrtSig{}'.format(time_str)] = Get_hist(Isolation_bin, events['HGCIsolation_TimeWrtSig{}'.format(time_str)]/events.Pho.pt, events.weight)
       histograms['relHGCIsolation_ClusterCleaned_TimeWrtSig{}'.format(time_str)] = Get_hist(Isolation_bin, events['HGCIsolation_ClusterCleaned_TimeWrtSig{}'.format(time_str)]/events.Pho.pt, events.weight)
+      histograms_2D['relHGCIsolation_TimeWrtSig{}'.format(time_str)] = Get_hist2D(Pt_bin, Isolation_bin, events.Pho.pt, events['HGCIsolation_TimeWrtSig{}'.format(time_str)]/events.Pho.pt, events.weight)
+      histograms_2D['relHGCIsolation_ClusterCleaned_TimeWrtSig{}'.format(time_str)] = Get_hist2D(Pt_bin, Isolation_bin, events.Pho.pt, events['HGCIsolation_ClusterCleaned_TimeWrtSig{}'.format(time_str)]/events.Pho.pt, events.weight)
 
 
     return{
       dataset: {
         'Histogram': histograms,
+        'Histogram2D': histograms_2D
       }
     }
 
@@ -328,6 +543,25 @@ def analysis(region, config):
              processor_instance = Accumulator(Kinematics_Weight)
            )
 
+
+  # 2D pt v.s. AUC
+  time_str_list = []
+  time_cut_candidate = [0.04 * (i+1) for i in range(5)]
+  time_cut_candidate.append(999.0)
+  for time_cut in time_cut_candidate:
+      time_str = ("%.2f"%time_cut).replace(".","p")
+      time_str_list.append(time_str)
+
+
+  prefix_list =  ["relHGCIsolation", "TracksterIsolation", "relTracksterIsolation", "HGCIsolation"]
+#  for ring_ in range(5):
+#    prefix_list.append('HGCIsolationRing{}'.format(ring_))
+#    prefix_list.append('relHGCIsolationRing{}'.format(ring_))
+
+  for prefix in prefix_list: 
+    draw_pt_vs_auc(output, time_str_list, prefix=prefix, plotdir = store_path)
+
+
   Comparison = []
   for dataset_ in output:
     for Histogram_name in output[dataset_]["Histogram"]:
@@ -349,7 +583,7 @@ def analysis(region, config):
     target_variable.append(['relHGCIsolationRing{}_TimeWrtSig'.format(ring_), 'relHGCIsolationRing{}_ClusterCleaned_TimeWrtSig'.format(ring_)])
 
   for target_ in target_variable:
-    for plot_variable_ in ['auc', 'Eff(bkg)@0.95sig', 'ROC']:
+    for plot_variable_ in ['auc', 'Eff(bkg)@0.95sig', 'ROC', 'Total_ROC', 'Eff', 'Eff-bkg']:
       Draw_Trend(PU_data, target_[0], plot_variable_, time_cut_candidate, baselinecut = 999.0, fname = os.path.join(store_path, target_[0] + '_' + plot_variable_ + ".png"), second_InputVariable = target_[1])
 
 if __name__ == '__main__':
