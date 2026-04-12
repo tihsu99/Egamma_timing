@@ -40,6 +40,7 @@ workflow:
       --dirin {workdir}
       --dirout {workdir}
       --mc
+      {max_events_arg}
       --no_exec
       --python_filename hlt_step.py
     - cmsRun hlt_step.py
@@ -54,6 +55,7 @@ workflow:
       --fileout file:stepMINI.root
       --hltProcess HLTX
       --mc
+      {max_events_arg}
       --no_exec
       --python_filename reco_step.py
     - cmsRun reco_step.py

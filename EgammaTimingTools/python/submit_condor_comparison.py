@@ -151,7 +151,7 @@ def prepare_shell(shell_path, commands, cmssw_dir, workdir_expr):
   os.chmod(shell_path, 0o755)
 
 
-def build_production_commands(config, particle, region, sample, variant, input_file, file_index, output_file):
+def build_production_commands(config, args, particle, region, sample, variant, input_file, file_index, output_file):
   particle_cfg = config["particles"][particle]
   variant_cfg = config["variants"][variant]
   workflow_cfg = config["workflow"]
@@ -167,6 +167,8 @@ def build_production_commands(config, particle, region, sample, variant, input_f
       "sample": sample,
       "variant": variant,
       "proc_modifier": variant_cfg.get("proc_modifier", ""),
+      "max_events": args.max_events if args.max_events is not None else -1,
+      "max_events_arg": "-n {}".format(args.max_events) if args.max_events is not None else "",
       "input_file": input_file,
       "file_index": file_index,
       "timing_dir": timing_dir,
@@ -199,6 +201,8 @@ def build_production_commands(config, particle, region, sample, variant, input_f
           online_label=online_label,
       )
   )
+  if args.max_events is not None:
+    commands[-1] += " maxEvents={}".format(args.max_events)
   commands.append("mv $WORKDIR/comparisonNtuple_{}.root {}".format(file_index, output_file))
   return commands
 
@@ -235,8 +239,8 @@ def submit_production_jobs(config, condor, farm_dir, args):
 
             shell_name = "{}_{}_{}_{}_{}.sh".format(variant, particle, region, sample, file_index)
             shell_path = os.path.join(farm_dir, shell_name)
-            workdir_expr = "${TMPDIR:-/tmp}/{}_{}_{}_{}_{}".format(args.tmp_tag, variant, particle, region, file_index)
-            commands = build_production_commands(config, particle, region, sample, variant, input_file, file_index, output_file)
+            workdir_expr = "${{TMPDIR:-/tmp}}/{}_{}_{}_{}_{}".format(args.tmp_tag, variant, particle, region, file_index)
+            commands = build_production_commands(config, args, particle, region, sample, variant, input_file, file_index, output_file)
             prepare_shell(shell_path, commands, config["cmssw-dir"], workdir_expr)
             condor.write("cfgFile={}\n".format(shell_name))
             condor.write("queue 1\n")
@@ -288,7 +292,7 @@ def submit_merge_jobs(config, condor, farm_dir, args):
 
     shell_name = "merge_{}_{}_{}_{}.sh".format(particle, region, sample, file_name.replace(".root", ""))
     shell_path = os.path.join(farm_dir, shell_name)
-    workdir_expr = "${TMPDIR:-/tmp}/{}_merge_{}_{}_{}".format(args.tmp_tag, particle, region, sample)
+    workdir_expr = "${{TMPDIR:-/tmp}}/{}_merge_{}_{}_{}".format(args.tmp_tag, particle, region, sample)
     commands = [
         "python3 {}/analysis/merge_comparison_trees.py --v4 {} --v5 {} --out $WORKDIR/{}".format(
             timing_dir, v4_file, v5_file, file_name
@@ -321,6 +325,7 @@ if __name__ == "__main__":
   parser.add_argument("--region", default=None, type=str)
   parser.add_argument("--sample", default=None, type=str)
   parser.add_argument("--max-files", default=None, type=int)
+  parser.add_argument("--max-events", default=None, type=int)
   parser.add_argument("--check", action="store_true")
   parser.add_argument("--test", action="store_true")
   args = parser.parse_args()
