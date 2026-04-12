@@ -27,6 +27,22 @@ def resolve_cli_path(path):
   return os.path.abspath(path)
 
 
+def detect_cmssw_src():
+  cmssw_base = os.environ.get("CMSSW_BASE")
+  if cmssw_base:
+    return os.path.join(cmssw_base, "src")
+
+  current = os.getcwd()
+  while True:
+    if os.path.basename(current) == "src" and "CMSSW_" in os.path.basename(os.path.dirname(current)):
+      return current
+    parent = os.path.dirname(current)
+    if parent == current:
+      break
+    current = parent
+  raise RuntimeError("Unable to determine CMSSW src directory. Run inside a CMSSW area or set cmssw-dir in the config.")
+
+
 def run_command(command):
   return subprocess.check_output(["bash", "-lc", command], text=True)
 
@@ -166,6 +182,7 @@ def build_production_commands(config, args, particle, region, sample, variant, i
       "region": region,
       "sample": sample,
       "variant": variant,
+      "particle_type": particle.capitalize(),
       "proc_modifier": variant_cfg.get("proc_modifier", ""),
       "max_events": args.max_events if args.max_events is not None else -1,
       "max_events_arg": "-n {}".format(args.max_events) if args.max_events is not None else "",
@@ -178,6 +195,9 @@ def build_production_commands(config, args, particle, region, sample, variant, i
       "comparison_input": comparison_input,
       "output_file": output_file,
       "workdir": "$WORKDIR",
+      "hlt_output": workflow_cfg.get("hlt_output", "step_hlt.root"),
+      "reco_output": workflow_cfg.get("reco_output", "step_reco.root"),
+      "reco_output_commands": workflow_cfg.get("reco_output_commands", ""),
   }
 
   commands = []
@@ -334,7 +354,10 @@ if __name__ == "__main__":
     config = yaml.safe_load(handle)
 
   config_dir = os.path.dirname(os.path.abspath(args.config))
-  config["cmssw-dir"] = resolve_path(config["cmssw-dir"], config_dir)
+  if config.get("cmssw-dir"):
+    config["cmssw-dir"] = resolve_path(config["cmssw-dir"], config_dir)
+  else:
+    config["cmssw-dir"] = detect_cmssw_src()
   config["timing-dir"] = resolve_path(config.get("timing-dir", ".."), config_dir)
   if args.sample_config is not None:
     sample_config_path = resolve_cli_path(args.sample_config)

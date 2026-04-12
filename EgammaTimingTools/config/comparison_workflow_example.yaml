@@ -1,5 +1,6 @@
 # Paths are resolved relative to this yaml file.
-cmssw-dir: ../../CMSSW_X_Y_Z/src
+# If omitted, the submitter uses the current CMSSW environment.
+cmssw-dir:
 timing-dir: ..
 xrootd-host: root://se01.grid.nchc.org.tw//
 sample-config: comparison_samples_example.yaml
@@ -25,9 +26,35 @@ particles:
       endcap: photonsHGC
 
 workflow:
-  # Commands are executed inside $WORKDIR. Keep all large EDM outputs there and copy out
-  # only the compact comparison ntuple produced at the end.
+  # Two-step workflow:
+  # 1. rerun HLT-side products in process HLTX
+  # 2. rerun offline RAW2DIGI/L1Reco/RECO/RECOSIM/PAT on the HLT output
+  # Keep all heavy intermediates in $WORKDIR and copy out only the comparison ntuple.
+  hlt_output: step_hlt.root
+  reco_output: step_reco.root
+  reco_output_commands: >-
+    process.MINIAODSIMoutput.outputCommands.append('keep recoGsfElectron*_gedGsfElectron*_*_*');
+    process.MINIAODSIMoutput.outputCommands.append('keep recoGsfTracks_electronGsfTracks_*_*');
+    process.MINIAODSIMoutput.outputCommands.append('keep recoPhoton*_gedPhoton*_*_*');
+    process.MINIAODSIMoutput.outputCommands.append('keep *_ecalDrivenGsfElectronsHGC_*_*');
+    process.MINIAODSIMoutput.outputCommands.append('keep *_ecalDrivenGsfElectronCoresHGC_*_*');
+    process.MINIAODSIMoutput.outputCommands.append('keep *_photonsHGC_*_*');
+    process.MINIAODSIMoutput.outputCommands.append('keep *_photonCoreHGC_*_*');
+    process.MINIAODSIMoutput.outputCommands.append('keep recoSuperClusters_particleFlowSuperCluster*_*_*');
+    process.MINIAODSIMoutput.outputCommands.append('keep recoSuperClusters_*_*_*');
+    process.MINIAODSIMoutput.outputCommands.append('keep recoTracks_generalTracks_*_*');
+    process.MINIAODSIMoutput.outputCommands.append('keep recoTracks_trackExtenderWithMTD_*_*');
+    process.MINIAODSIMoutput.outputCommands.append('keep *_tofPID_*_*');
+    process.MINIAODSIMoutput.outputCommands.append('keep *_mtdTrackQualityMVA_*_*');
+    process.MINIAODSIMoutput.outputCommands.append('keep ticlTracksters_*_*_*');
+    process.MINIAODSIMoutput.outputCommands.append('keep *_ticlTrackstersMerge_*_*');
+    process.MINIAODSIMoutput.outputCommands.append('keep *_hgcalLayerClusters_*_*');
+    process.MINIAODSIMoutput.outputCommands.append('keep recoCaloClusters*_*_*_*');
+    process.MINIAODSIMoutput.outputCommands.append('keep HGCRecHitsSorted_*_*_*');
   commands:
+    # If a campaign needs full upstream L1 rerun, extend the first step list
+    # (for example by prepending L1TrackTrigger,L1 before L1P2GT) rather than
+    # collapsing HLT and offline RECO into one monolithic cmsDriver step.
     - >
       cmsDriver.py Phase2 -s L1P2GT,HLT:75e33 --processName=HLTX
       --conditions auto:phase2_realistic_T33
@@ -35,10 +62,11 @@ workflow:
       --era Phase2C17I13M9
       --eventcontent FEVTDEBUGHLT
       --customise SLHCUpgradeSimulations/Configuration/aging.customise_aging_1000
+      --customise EGammaReco/EGammaNtuples/customiseHLTForEGammaNtuples.customiseHLTFor{particle_type}Ntuples
       {proc_modifier}
       --filein {input_file}
-      --dirin {workdir}
-      --dirout {workdir}
+      --fileout file:{workdir}/{hlt_output}
+      --inputCommands "keep *, drop *_hlt*_*_HLT, drop triggerTriggerFilterObjectWithRefs_l1t*_*_HLT"
       --mc
       {max_events_arg}
       --no_exec
@@ -51,12 +79,14 @@ workflow:
       --eventcontent MINIAODSIM
       --geometry ExtendedRun4D110
       --era Phase2C17I13M9
-      --filein file:{workdir}/output.root
-      --fileout file:stepMINI.root
+      --customise SLHCUpgradeSimulations/Configuration/aging.customise_aging_1000
+      --customise_commands "{reco_output_commands}"
+      --filein file:{workdir}/{hlt_output}
+      --fileout file:{workdir}/{reco_output}
       --hltProcess HLTX
       --mc
       {max_events_arg}
       --no_exec
       --python_filename reco_step.py
     - cmsRun reco_step.py
-  ntuplizer_input: file:{workdir}/stepMINI.root
+  ntuplizer_input: file:{workdir}/{reco_output}
