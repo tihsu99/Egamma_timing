@@ -86,7 +86,7 @@ workflow:
     process.MINIAODSIMoutput.outputCommands.append('keep HGCRecHitsSorted_*_*_*');
   commands:
     - >
-      cmsDriver.py Phase2 -s L1P2GT,HLT:75e33 --processName=HLTX
+      cmsDriver.py Phase2 -s L1,L1TrackTrigger,L1P2GT,HLT:75e33 --processName=HLTX
       --conditions auto:phase2_realistic_T33
       --geometry ExtendedRun4D110
       --era Phase2C17I13M9
