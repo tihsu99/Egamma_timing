@@ -11,6 +11,14 @@ def check_dir(path):
     os.system("mkdir -p {}".format(path))
 
 
+def resolve_path(path, base_dir):
+  if path is None:
+    return None
+  if os.path.isabs(path):
+    return os.path.abspath(path)
+  return os.path.abspath(os.path.join(base_dir, path))
+
+
 def write_condor_header(condor, farm_dir, universe, job_flavour, proxy):
   condor.write("output = {}/job_common_$(Process).out\n".format(farm_dir))
   condor.write("error  = {}/job_common_$(Process).err\n".format(farm_dir))
@@ -71,7 +79,9 @@ def prepare_shell(shell_path, commands, cmssw_dir, workdir_expr):
   with open(shell_path, "w") as shell:
     shell.write("#!/bin/bash\n")
     shell.write("set -e\n")
-    shell.write("export X509_USER_PROXY=$1\n")
+    shell.write("if [ -n \"$1\" ]; then\n")
+    shell.write("  export X509_USER_PROXY=$1\n")
+    shell.write("fi\n")
     shell.write("WORKDIR={}\n".format(workdir_expr))
     shell.write("mkdir -p $WORKDIR\n")
     shell.write("echo 'Using WORKDIR=' $WORKDIR\n")
@@ -137,16 +147,32 @@ def build_production_commands(config, particle, region, sample, variant, input_f
   return commands
 
 
+def accept_sample(args, particle, region, sample):
+  if args.particle is not None and particle != args.particle:
+    return False
+  if args.region is not None and region != args.region:
+    return False
+  if args.sample is not None and sample != args.sample:
+    return False
+  return True
+
+
 def submit_production_jobs(config, condor, farm_dir, args):
   default_host = config.get("xrootd-host", "root://se01.grid.nchc.org.tw//")
+  created_shells = []
+  created_jobs = 0
   for particle, particle_cfg in config["samples"].items():
     for region, sample_map in particle_cfg.items():
       for sample, dataset_path in sample_map.items():
+        if not accept_sample(args, particle, region, sample):
+          continue
         input_files = resolve_input_files(dataset_path, default_host)
         for variant in args.variant:
           variant_outdir = os.path.join(args.outdir, variant, particle, region, sample)
           check_dir(variant_outdir)
           for file_index, input_file in enumerate(input_files):
+            if args.max_files is not None and created_jobs >= args.max_files:
+              return created_shells
             output_file = os.path.join(variant_outdir, "comparisonNtuple_{}.root".format(file_index))
             if args.check and os.path.exists(output_file):
               continue
@@ -158,6 +184,9 @@ def submit_production_jobs(config, condor, farm_dir, args):
             prepare_shell(shell_path, commands, config["cmssw-dir"], workdir_expr)
             condor.write("cfgFile={}\n".format(shell_name))
             condor.write("queue 1\n")
+            created_shells.append(shell_path)
+            created_jobs += 1
+  return created_shells
 
 
 def discover_comparison_files(root_dir):
@@ -187,7 +216,13 @@ def submit_merge_jobs(config, condor, farm_dir, args):
     raise RuntimeError("Mismatch between v4 and v5 comparison ntuples")
 
   timing_dir = config["timing-dir"]
+  created_shells = []
+  created_jobs = 0
   for (particle, region, sample, file_name), v4_file in sorted(v4_files.items()):
+    if not accept_sample(args, particle, region, sample):
+      continue
+    if args.max_files is not None and created_jobs >= args.max_files:
+      return created_shells
     v5_file = v5_files[(particle, region, sample, file_name)]
     output_dir = os.path.join(args.outdir, particle, region, sample)
     check_dir(output_dir)
@@ -207,6 +242,9 @@ def submit_merge_jobs(config, condor, farm_dir, args):
     prepare_shell(shell_path, commands, config["cmssw-dir"], workdir_expr)
     condor.write("cfgFile={}\n".format(shell_name))
     condor.write("queue 1\n")
+    created_shells.append(shell_path)
+    created_jobs += 1
+  return created_shells
 
 
 if __name__ == "__main__":
@@ -222,6 +260,10 @@ if __name__ == "__main__":
   parser.add_argument("--universe", default="vanilla", type=str)
   parser.add_argument("--proxy", default=None, type=str)
   parser.add_argument("--tmp-tag", default="EGammaTimingComparison", type=str)
+  parser.add_argument("--particle", choices=["electron", "photon"], default=None)
+  parser.add_argument("--region", default=None, type=str)
+  parser.add_argument("--sample", default=None, type=str)
+  parser.add_argument("--max-files", default=None, type=int)
   parser.add_argument("--check", action="store_true")
   parser.add_argument("--test", action="store_true")
   args = parser.parse_args()
@@ -229,16 +271,35 @@ if __name__ == "__main__":
   with open(args.config) as handle:
     config = yaml.safe_load(handle)
 
+  config_dir = os.path.dirname(os.path.abspath(args.config))
+  config["cmssw-dir"] = resolve_path(config["cmssw-dir"], config_dir)
+  config["timing-dir"] = resolve_path(config.get("timing-dir", ".."), config_dir)
+
+  args.farm = os.path.abspath(args.farm)
+  args.outdir = os.path.abspath(args.outdir)
+  if args.v4_dir is not None:
+    args.v4_dir = os.path.abspath(args.v4_dir)
+  if args.v5_dir is not None:
+    args.v5_dir = os.path.abspath(args.v5_dir)
+
   check_dir(args.farm)
   condor_path = os.path.join(args.farm, "condor.sub")
+  created_shells = []
   with open(condor_path, "w") as condor:
     write_condor_header(condor, args.farm, args.universe, args.jobFlavour, args.proxy)
     if args.mode == "produce":
-      submit_production_jobs(config, condor, args.farm, args)
+      created_shells = submit_production_jobs(config, condor, args.farm, args)
     else:
       if args.v4_dir is None or args.v5_dir is None:
         raise RuntimeError("--v4_dir and --v5_dir are required in merge mode")
-      submit_merge_jobs(config, condor, args.farm, args)
+      created_shells = submit_merge_jobs(config, condor, args.farm, args)
+
+  if len(created_shells):
+    print("Generated {} shell script(s):".format(len(created_shells)))
+    for shell_path in created_shells:
+      print(shell_path)
+  else:
+    print("No shell scripts were generated.")
 
   if not args.test:
     os.system("condor_submit {}".format(condor_path))

@@ -1,5 +1,6 @@
-cmssw-dir: /path/to/CMSSW_X_Y_Z/src
-timing-dir: /Users/tihsu/PycharmProjects/Egamma_timing/EgammaTimingTools
+# Paths are resolved relative to this yaml file.
+cmssw-dir: ../../CMSSW_X_Y_Z/src
+timing-dir: ..
 xrootd-host: root://se01.grid.nchc.org.tw//
 
 variants:
