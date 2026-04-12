@@ -30,8 +30,7 @@ workflow:
   # 1. rerun HLT-side products in process HLTX
   # 2. rerun offline RAW2DIGI/L1Reco/RECO/RECOSIM/PAT on the HLT output
   # Keep all heavy intermediates in $WORKDIR and copy out only the comparison ntuple.
-  # Set hlt_customise only if the corresponding package exists in your CMSSW area.
-  hlt_customise:
+  hlt_customise: --customise EGammaReco/EGammaNtuples/customiseHLTForEGammaNtuples.customiseHLTFor{particle_type}Ntuples
   hlt_output: step_hlt.root
   reco_output: step_reco.root
   reco_output_commands: >-
