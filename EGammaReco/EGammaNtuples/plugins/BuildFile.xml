@@ -1,0 +1,12 @@
+<use name="DataFormats/TrackReco"/>
+<use name="FWCore/Framework"/>
+<use name="FWCore/ParameterSet"/>
+<use name="FWCore/PluginManager"/>
+<use name="Geometry/CaloTopology"/>
+<use name="Geometry/Records"/>
+<use name="Geometry/CaloGeometry"/>
+<use name="FWCore/ServiceRegistry"/>
+<use name="CommonTools/UtilAlgos"/>
+<use name="RecoLocalCalo/HGCalRecAlgos"/>
+<use name="RecoEgamma/EgammaTools"/>
+<flags EDM_PLUGIN="1"/>
