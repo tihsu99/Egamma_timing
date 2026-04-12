@@ -152,13 +152,6 @@ def replace_placeholders(template, values):
   return result
 
 
-def normalize_comma_separated(value):
-  if value is None:
-    return ""
-  parts = [part.strip() for part in str(value).split(",")]
-  return ",".join(part for part in parts if part)
-
-
 def prepare_shell(shell_path, commands, cmssw_dir, workdir_expr):
   with open(shell_path, "w") as shell:
     shell.write("#!/bin/bash\n")
@@ -215,9 +208,6 @@ def build_production_commands(config, args, particle, region, sample, variant, i
       "reco_output": workflow_cfg.get("reco_output", "step_reco.root"),
       "reco_output_commands": workflow_cfg.get("reco_output_commands", ""),
       "hlt_customise_commands": workflow_cfg.get("hlt_customise_commands", ""),
-      "step1_customise": normalize_comma_separated(
-          workflow_cfg.get("step1_customise", "SLHCUpgradeSimulations/Configuration/aging.customise_aging_1000")
-      ),
       }
 
   commands = []

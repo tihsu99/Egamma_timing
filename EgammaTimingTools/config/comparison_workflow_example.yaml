@@ -38,25 +38,20 @@ particles:
 
 workflow:
   # Two-step workflow:
-  # 1. rerun upstream L1/L1TrackTrigger together with L1P2GT + HLT in process HLTX
+  # 1. rerun HLT-side products in process HLTX
   # 2. rerun offline RAW2DIGI/L1Reco/RECO/RECOSIM/PAT on the HLT output
   # Keep all heavy intermediates in $WORKDIR and copy out only the comparison ntuple.
-  step1_customise: >-
-    SLHCUpgradeSimulations/Configuration/aging.customise_aging_1000,
-    Configuration/DataProcessing/Utils.addMonitoring,
-    L1Trigger/Configuration/customisePhase2FEVTDEBUGHLT.customisePhase2FEVTDEBUGHLT,
-    L1Trigger/Configuration/customisePhase2TTOn110.customisePhase2TTOn110
   hlt_customise_commands: >-
     process.load('RecoEgamma.EgammaHLTProducers.hltEgammaHLTExtra_cfi');
-    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltEgammaHLTExtra_*_*');
-    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltEgammaCandidatesUnseeded_*_*');
-    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltHGCalRecHit_*_*');
-    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltMergeLayerClusters_*_*');
-    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltTiclCandidate_*_*');
-    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltTiclTrackstersCLUE3DHigh_*_*');
-    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltParticleFlowSuperClusterECALUnseeded_*_*');
-    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltParticleFlowSuperClusterHGCalFromTICLUnseeded_*_*');
-    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltTiclEGammaSuperClusterProducerUnseeded_*_*');
+#    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltEgammaHLTExtra_*_*');
+#    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltEgammaCandidatesUnseeded_*_*');
+#    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltHGCalRecHit_*_*');
+#    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltMergeLayerClusters_*_*');
+#    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltTiclCandidate_*_*');
+#    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltTiclTrackstersCLUE3DHigh_*_*');
+#    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltParticleFlowSuperClusterECALUnseeded_*_*');
+#    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltParticleFlowSuperClusterHGCalFromTICLUnseeded_*_*');
+#    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltTiclEGammaSuperClusterProducerUnseeded_*_*');
     process.egammaExtra_step = cms.EndPath(process.hltEgammaHLTExtra);
     process.schedule.append(process.egammaExtra_step)
   hlt_output: step_hlt.root
@@ -90,16 +85,13 @@ workflow:
     process.MINIAODSIMoutput.outputCommands.append('keep recoCaloClusters*_*_*_*');
     process.MINIAODSIMoutput.outputCommands.append('keep HGCRecHitsSorted_*_*_*');
   commands:
-    # Step 1 deliberately reruns L1/L1TrackTrigger together with HLT because the
-    # Phase-2 HLT menu depends on that upstream configuration for stable geometry
-    # and product setup on GEN-SIM-DIGI-RAW-MINIAOD inputs.
     - >
-      cmsDriver.py Phase2 -s L1,L1TrackTrigger,L1P2GT,HLT:75e33 --processName=HLTX
+      cmsDriver.py Phase2 -s L1P2GT,HLT:75e33 --processName=HLTX
       --conditions auto:phase2_realistic_T33
       --geometry ExtendedRun4D110
       --era Phase2C17I13M9
       --eventcontent FEVTDEBUGHLT
-      --customise "{step1_customise}"
+      --customise SLHCUpgradeSimulations/Configuration/aging.customise_aging_1000
       --customise_commands "{hlt_customise_commands}"
       {proc_modifier}
       --filein {input_file}
