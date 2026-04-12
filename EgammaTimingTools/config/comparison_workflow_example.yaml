@@ -41,6 +41,11 @@ workflow:
   # 1. rerun HLT-side products in process HLTX
   # 2. rerun offline RAW2DIGI/L1Reco/RECO/RECOSIM/PAT on the HLT output
   # Keep all heavy intermediates in $WORKDIR and copy out only the comparison ntuple.
+  step1_customise: >-
+    SLHCUpgradeSimulations/Configuration/aging.customise_aging_1000,
+    Configuration/DataProcessing/Utils.addMonitoring,
+    L1Trigger/Configuration/customisePhase2FEVTDEBUGHLT.customisePhase2FEVTDEBUGHLT,
+    L1Trigger/Configuration/customisePhase2TTOn110.customisePhase2TTOn110
   hlt_customise_commands: >-
     process.load('RecoEgamma.EgammaHLTProducers.hltEgammaHLTExtra_cfi');
     process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltEgammaHLTExtra_*_*');
@@ -91,7 +96,7 @@ workflow:
       --geometry ExtendedRun4D110
       --era Phase2C17I13M9
       --eventcontent FEVTDEBUGHLT
-      --customise SLHCUpgradeSimulations/Configuration/aging.customise_aging_1000
+      --customise "{step1_customise}"
       --customise_commands "{hlt_customise_commands}"
       {proc_modifier}
       --filein {input_file}
