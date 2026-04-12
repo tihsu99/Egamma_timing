@@ -19,6 +19,14 @@ def resolve_path(path, base_dir):
   return os.path.abspath(os.path.join(base_dir, path))
 
 
+def resolve_cli_path(path):
+  if path is None:
+    return None
+  if os.path.isabs(path):
+    return os.path.abspath(path)
+  return os.path.abspath(path)
+
+
 def run_command(command):
   return subprocess.check_output(["bash", "-lc", command], text=True)
 
@@ -323,9 +331,13 @@ if __name__ == "__main__":
   config_dir = os.path.dirname(os.path.abspath(args.config))
   config["cmssw-dir"] = resolve_path(config["cmssw-dir"], config_dir)
   config["timing-dir"] = resolve_path(config.get("timing-dir", ".."), config_dir)
-  sample_config_path = args.sample_config or config.get("sample-config")
+  if args.sample_config is not None:
+    sample_config_path = resolve_cli_path(args.sample_config)
+  else:
+    sample_config_path = config.get("sample-config")
+    if sample_config_path is not None:
+      sample_config_path = resolve_path(sample_config_path, config_dir)
   if sample_config_path is not None:
-    sample_config_path = resolve_path(sample_config_path, config_dir)
     with open(sample_config_path) as handle:
       config["samples"] = yaml.safe_load(handle)["samples"]
   elif "samples" not in config:
