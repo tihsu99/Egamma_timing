@@ -2,7 +2,8 @@
 # If omitted, the submitter uses the current CMSSW environment.
 cmssw-dir:
 timing-dir: ..
-xrootd-host: root://se01.grid.nchc.org.tw//
+das-xrootd-host: root://cms-xrd-global.cern.ch//
+storage-xrootd-host: root://se01.grid.nchc.org.tw:1094//
 sample-config: comparison_samples_example.yaml
 
 variants:

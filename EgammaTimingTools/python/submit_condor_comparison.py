@@ -63,14 +63,14 @@ def write_condor_header(condor, farm_dir, universe, job_flavour, proxy):
     condor.write("arguments = $(Proxy_path)\n")
 
 
-def detect_storage(dataset_path, default_host):
+def detect_storage(dataset_path, storage_host):
   if dataset_path.startswith("root://"):
     parsed = urlparse(dataset_path)
     host = "{}://{}".format(parsed.scheme, parsed.netloc)
     remote_path = parsed.path
     return host, remote_path
   if dataset_path.startswith("/cms/store"):
-    return default_host, dataset_path
+    return storage_host, dataset_path
   return None, dataset_path
 
 
@@ -91,10 +91,10 @@ def normalize_sample_spec(sample_spec):
   return {"path": sample_spec}
 
 
-def resolve_das_files(dataset_name, dbs_instance, default_host):
+def resolve_das_files(dataset_name, dbs_instance, redirector_host):
   query = "file dataset={} instance={}".format(dataset_name, dbs_instance)
   output = run_command("dasgoclient --query '{}'".format(query))
-  host_prefix = default_host if default_host.endswith("//") else default_host + "//"
+  host_prefix = redirector_host if redirector_host.endswith("//") else redirector_host + "//"
   files = []
   for line in output.splitlines():
     line = line.strip()
@@ -108,8 +108,8 @@ def resolve_das_files(dataset_name, dbs_instance, default_host):
   return files
 
 
-def resolve_input_files(dataset_path, default_host):
-  host, path = detect_storage(dataset_path, default_host)
+def resolve_input_files(dataset_path, storage_host):
+  host, path = detect_storage(dataset_path, storage_host)
   if host is None:
     output = run_command("ls {}".format(path))
     files = [os.path.join(path, item) for item in output.splitlines() if item.endswith(".root")]
@@ -130,13 +130,13 @@ def resolve_input_files(dataset_path, default_host):
   return files
 
 
-def resolve_sample_files(sample_spec, default_host):
+def resolve_sample_files(sample_spec, das_redirector, storage_host):
   sample_cfg = normalize_sample_spec(sample_spec)
   if "dataset" in sample_cfg:
     dbs_instance = sample_cfg.get("dbs_instance", "prod/global")
-    return resolve_das_files(sample_cfg["dataset"], dbs_instance, default_host)
+    return resolve_das_files(sample_cfg["dataset"], dbs_instance, das_redirector)
   if "path" in sample_cfg:
-    return resolve_input_files(sample_cfg["path"], default_host)
+    return resolve_input_files(sample_cfg["path"], storage_host)
   raise RuntimeError("Sample specification must contain either 'dataset' or 'path'")
 
 
@@ -251,7 +251,8 @@ def accept_sample(args, particle, region, sample):
 
 
 def submit_production_jobs(config, condor, farm_dir, args):
-  default_host = config.get("xrootd-host", "root://se01.grid.nchc.org.tw//")
+  das_redirector = config.get("das-xrootd-host", "root://cms-xrd-global.cern.ch//")
+  storage_host = config.get("storage-xrootd-host", config.get("xrootd-host", das_redirector))
   created_shells = []
   created_jobs = 0
   for particle, particle_cfg in config["samples"].items():
@@ -259,7 +260,7 @@ def submit_production_jobs(config, condor, farm_dir, args):
       for sample, sample_spec in sample_map.items():
         if not accept_sample(args, particle, region, sample):
           continue
-        input_files = resolve_sample_files(sample_spec, default_host)
+        input_files = resolve_sample_files(sample_spec, das_redirector, storage_host)
         for variant in args.variant:
           variant_outdir = os.path.join(args.outdir, variant, particle, region, sample)
           check_dir(variant_outdir)
