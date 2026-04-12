@@ -380,7 +380,7 @@ def analysis(region, config):
       events = NanoEventsFactory.from_root(
         os.path.join(input_path, process_name, process_name + ".root"),
         schemaclass = BaseSchema,
-        treepath = "ntuplizer/tree"
+        treepath = config.treepath
       ).events()
 
       events = events[events.Pho_pt > 10]
@@ -420,7 +420,7 @@ def analysis(region, config):
 
   output = run(
              dataset,
-             "ntuplizer/tree",
+             config.treepath,
              processor_instance = Accumulator(Kinematics_Weight)
            )
 
@@ -461,7 +461,7 @@ def produce_ntuple(region, config):
       events = NanoEventsFactory.from_root(
         os.path.join(input_path, process_name, process_name + ".root"),
         schemaclass = NanoAODSchema,
-        treepath = "ntuplizer/tree"
+        treepath = config.treepath
       ).events()
 
       events = events[events.Pho.pt > 10]
@@ -517,6 +517,7 @@ if __name__ == '__main__':
   parser.add_argument('--region', default = ['all'], nargs = '+', type = str)
   parser.add_argument('--particle', default = 'photon', type = str)
   parser.add_argument('--method', default = 'analysis', type=str)
+  parser.add_argument('--treepath', default = 'ntuplizer/tree', type=str)
   config = parser.parse_args()
 
   if 'all' in config.region:

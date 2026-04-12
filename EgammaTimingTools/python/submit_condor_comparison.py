@@ -1,0 +1,244 @@
+import argparse
+import os
+import subprocess
+from urllib.parse import urlparse
+
+import yaml
+
+
+def check_dir(path):
+  if not os.path.exists(path):
+    os.system("mkdir -p {}".format(path))
+
+
+def write_condor_header(condor, farm_dir, universe, job_flavour, proxy):
+  condor.write("output = {}/job_common_$(Process).out\n".format(farm_dir))
+  condor.write("error  = {}/job_common_$(Process).err\n".format(farm_dir))
+  condor.write("log    = {}/job_common_$(Process).log\n".format(farm_dir))
+  condor.write("executable = {}/$(cfgFile)\n".format(farm_dir))
+  condor.write("universe = {}\n".format(universe))
+  condor.write("on_exit_remove   = (ExitBySignal == False) && (ExitCode == 0)\n")
+  condor.write("max_retries = 3\n")
+  condor.write('+JobFlavour = "{}"\n'.format(job_flavour))
+  condor.write("x509userproxy = $ENV(X509_USER_PROXY)\n")
+  condor.write("use_x509userproxy = True\n")
+  if proxy is not None:
+    condor.write("Proxy_path = {}\n".format(proxy))
+    condor.write("arguments = $(Proxy_path)\n")
+
+
+def detect_storage(dataset_path, default_host):
+  if dataset_path.startswith("root://"):
+    parsed = urlparse(dataset_path)
+    host = "{}://{}".format(parsed.scheme, parsed.netloc)
+    remote_path = parsed.path
+    return host, remote_path
+  if dataset_path.startswith("/cms/store"):
+    return default_host, dataset_path
+  return None, dataset_path
+
+
+def resolve_input_files(dataset_path, default_host):
+  host, path = detect_storage(dataset_path, default_host)
+  if host is None:
+    output = subprocess.check_output(["bash", "-lc", "ls {}".format(path)], text=True)
+    files = [os.path.join(path, item) for item in output.splitlines() if item.endswith(".root")]
+    files.sort()
+    return files
+
+  xrdfs_host = host if host.endswith("//") else host + "//"
+  output = subprocess.check_output(["bash", "-lc", "xrdfs {} ls {}".format(xrdfs_host, path)], text=True)
+  files = []
+  for line in output.splitlines():
+    if not line.endswith(".root"):
+      continue
+    if line.startswith("/"):
+      files.append("{}{}".format(xrdfs_host, line))
+    else:
+      files.append(line)
+  files.sort()
+  return files
+
+
+def replace_placeholders(template, values):
+  result = template
+  for key, value in values.items():
+    result = result.replace("{" + key + "}", str(value))
+  return result
+
+
+def prepare_shell(shell_path, commands, cmssw_dir, workdir_expr):
+  with open(shell_path, "w") as shell:
+    shell.write("#!/bin/bash\n")
+    shell.write("set -e\n")
+    shell.write("export X509_USER_PROXY=$1\n")
+    shell.write("WORKDIR={}\n".format(workdir_expr))
+    shell.write("mkdir -p $WORKDIR\n")
+    shell.write("echo 'Using WORKDIR=' $WORKDIR\n")
+    shell.write("cd {}\n".format(cmssw_dir))
+    shell.write("eval `scramv1 runtime -sh`\n")
+    shell.write("cd $WORKDIR\n")
+    for command in commands:
+      shell.write(command)
+      shell.write("\n")
+    shell.write("rm -rf $WORKDIR\n")
+  os.chmod(shell_path, 0o755)
+
+
+def build_production_commands(config, particle, region, sample, variant, input_file, file_index, output_file):
+  particle_cfg = config["particles"][particle]
+  variant_cfg = config["variants"][variant]
+  workflow_cfg = config["workflow"]
+  offline_label = particle_cfg["offline_labels"][region]
+  timing_dir = config["timing-dir"]
+  comparison_cfg = particle_cfg["ntuplizer_cfg"]
+  online_label = particle_cfg["online_label"]
+  comparison_input = workflow_cfg["ntuplizer_input"]
+
+  placeholders = {
+      "particle": particle,
+      "region": region,
+      "sample": sample,
+      "variant": variant,
+      "proc_modifier": variant_cfg.get("proc_modifier", ""),
+      "input_file": input_file,
+      "file_index": file_index,
+      "timing_dir": timing_dir,
+      "comparison_cfg": comparison_cfg,
+      "offline_label": offline_label,
+      "online_label": online_label,
+      "comparison_input": comparison_input,
+      "output_file": output_file,
+      "workdir": "$WORKDIR",
+  }
+
+  commands = []
+  for command in workflow_cfg["commands"]:
+    commands.append(replace_placeholders(command, placeholders))
+
+  ntuplizer_input = replace_placeholders(comparison_input, placeholders)
+  if particle == "electron":
+    label_arg = "electronLabel={}".format(offline_label)
+  else:
+    label_arg = "photonLabel={}".format(offline_label)
+
+  commands.append(
+      "cmsRun {timing_dir}/python/{comparison_cfg} inputFiles={nt_input} outDir=$WORKDIR outFileNumber={file_index} "
+      "{label_arg} onlineLabel={online_label}".format(
+          timing_dir=timing_dir,
+          comparison_cfg=comparison_cfg,
+          nt_input=ntuplizer_input,
+          file_index=file_index,
+          label_arg=label_arg,
+          online_label=online_label,
+      )
+  )
+  commands.append("mv $WORKDIR/comparisonNtuple_{}.root {}".format(file_index, output_file))
+  return commands
+
+
+def submit_production_jobs(config, condor, farm_dir, args):
+  default_host = config.get("xrootd-host", "root://se01.grid.nchc.org.tw//")
+  for particle, particle_cfg in config["samples"].items():
+    for region, sample_map in particle_cfg.items():
+      for sample, dataset_path in sample_map.items():
+        input_files = resolve_input_files(dataset_path, default_host)
+        for variant in args.variant:
+          variant_outdir = os.path.join(args.outdir, variant, particle, region, sample)
+          check_dir(variant_outdir)
+          for file_index, input_file in enumerate(input_files):
+            output_file = os.path.join(variant_outdir, "comparisonNtuple_{}.root".format(file_index))
+            if args.check and os.path.exists(output_file):
+              continue
+
+            shell_name = "{}_{}_{}_{}_{}.sh".format(variant, particle, region, sample, file_index)
+            shell_path = os.path.join(farm_dir, shell_name)
+            workdir_expr = "${TMPDIR:-/tmp}/{}_{}_{}_{}_{}".format(args.tmp_tag, variant, particle, region, file_index)
+            commands = build_production_commands(config, particle, region, sample, variant, input_file, file_index, output_file)
+            prepare_shell(shell_path, commands, config["cmssw-dir"], workdir_expr)
+            condor.write("cfgFile={}\n".format(shell_name))
+            condor.write("queue 1\n")
+
+
+def discover_comparison_files(root_dir):
+  mapping = dict()
+  for particle in os.listdir(root_dir):
+    particle_dir = os.path.join(root_dir, particle)
+    if not os.path.isdir(particle_dir):
+      continue
+    for region in os.listdir(particle_dir):
+      region_dir = os.path.join(particle_dir, region)
+      if not os.path.isdir(region_dir):
+        continue
+      for sample in os.listdir(region_dir):
+        sample_dir = os.path.join(region_dir, sample)
+        if not os.path.isdir(sample_dir):
+          continue
+        for file_name in os.listdir(sample_dir):
+          if file_name.endswith(".root"):
+            mapping[(particle, region, sample, file_name)] = os.path.join(sample_dir, file_name)
+  return mapping
+
+
+def submit_merge_jobs(config, condor, farm_dir, args):
+  v4_files = discover_comparison_files(args.v4_dir)
+  v5_files = discover_comparison_files(args.v5_dir)
+  if set(v4_files.keys()) != set(v5_files.keys()):
+    raise RuntimeError("Mismatch between v4 and v5 comparison ntuples")
+
+  timing_dir = config["timing-dir"]
+  for (particle, region, sample, file_name), v4_file in sorted(v4_files.items()):
+    v5_file = v5_files[(particle, region, sample, file_name)]
+    output_dir = os.path.join(args.outdir, particle, region, sample)
+    check_dir(output_dir)
+    output_file = os.path.join(output_dir, file_name)
+    if args.check and os.path.exists(output_file):
+      continue
+
+    shell_name = "merge_{}_{}_{}_{}.sh".format(particle, region, sample, file_name.replace(".root", ""))
+    shell_path = os.path.join(farm_dir, shell_name)
+    workdir_expr = "${TMPDIR:-/tmp}/{}_merge_{}_{}_{}".format(args.tmp_tag, particle, region, sample)
+    commands = [
+        "python3 {}/analysis/merge_comparison_trees.py --v4 {} --v5 {} --out $WORKDIR/{}".format(
+            timing_dir, v4_file, v5_file, file_name
+        ),
+        "mv $WORKDIR/{} {}".format(file_name, output_file),
+    ]
+    prepare_shell(shell_path, commands, config["cmssw-dir"], workdir_expr)
+    condor.write("cfgFile={}\n".format(shell_name))
+    condor.write("queue 1\n")
+
+
+if __name__ == "__main__":
+  parser = argparse.ArgumentParser(description="Prepare Condor jobs for comparison ntuple production and merge with /tmp staging")
+  parser.add_argument("--config", required=True, type=str)
+  parser.add_argument("--mode", choices=["produce", "merge"], default="produce")
+  parser.add_argument("--variant", nargs="+", choices=["v4", "v5"], default=["v4", "v5"])
+  parser.add_argument("--farm", default="FarmComparison", type=str)
+  parser.add_argument("--outdir", required=True, type=str)
+  parser.add_argument("--v4_dir", type=str)
+  parser.add_argument("--v5_dir", type=str)
+  parser.add_argument("--jobFlavour", default="workday", type=str)
+  parser.add_argument("--universe", default="vanilla", type=str)
+  parser.add_argument("--proxy", default=None, type=str)
+  parser.add_argument("--tmp-tag", default="EGammaTimingComparison", type=str)
+  parser.add_argument("--check", action="store_true")
+  parser.add_argument("--test", action="store_true")
+  args = parser.parse_args()
+
+  with open(args.config) as handle:
+    config = yaml.safe_load(handle)
+
+  check_dir(args.farm)
+  condor_path = os.path.join(args.farm, "condor.sub")
+  with open(condor_path, "w") as condor:
+    write_condor_header(condor, args.farm, args.universe, args.jobFlavour, args.proxy)
+    if args.mode == "produce":
+      submit_production_jobs(config, condor, args.farm, args)
+    else:
+      if args.v4_dir is None or args.v5_dir is None:
+        raise RuntimeError("--v4_dir and --v5_dir are required in merge mode")
+      submit_merge_jobs(config, condor, args.farm, args)
+
+  if not args.test:
+    os.system("condor_submit {}".format(condor_path))

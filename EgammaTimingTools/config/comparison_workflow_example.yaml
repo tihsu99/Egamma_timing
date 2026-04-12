@@ -1,0 +1,68 @@
+cmssw-dir: /path/to/CMSSW_X_Y_Z/src
+timing-dir: /Users/tihsu/PycharmProjects/Egamma_timing/EgammaTimingTools
+xrootd-host: root://se01.grid.nchc.org.tw//
+
+variants:
+  v4:
+    proc_modifier: ""
+  v5:
+    proc_modifier: "--procModifiers ticl_v5"
+
+particles:
+  electron:
+    ntuplizer_cfg: ElectronComparisonNtuplizer.py
+    online_label: hltEgammaHLTExtra:Unseeded:HLTX
+    offline_labels:
+      barrel: gedGsfElectrons
+      endcap: ecalDrivenGsfElectronsHGC
+  photon:
+    ntuplizer_cfg: PhotonComparisonNtuplizer.py
+    online_label: hltEgammaHLTExtra:Unseeded:HLTX
+    offline_labels:
+      barrel: gedPhotons
+      endcap: photonsHGC
+
+workflow:
+  # Commands are executed inside $WORKDIR. Keep all large EDM outputs there and copy out
+  # only the compact comparison ntuple produced at the end.
+  commands:
+    - >
+      cmsDriver.py Phase2 -s L1P2GT,HLT:75e33 --processName=HLTX
+      --conditions auto:phase2_realistic_T33
+      --geometry ExtendedRun4D110
+      --era Phase2C17I13M9
+      --eventcontent FEVTDEBUGHLT
+      --customise SLHCUpgradeSimulations/Configuration/aging.customise_aging_1000
+      {proc_modifier}
+      --filein {input_file}
+      --dirin {workdir}
+      --dirout {workdir}
+      --mc
+      --no_exec
+      --python_filename hlt_step.py
+    - cmsRun hlt_step.py
+    - >
+      cmsDriver.py step2_RECO_MINI -s RAW2DIGI,L1Reco,RECO,RECOSIM,PAT
+      --conditions auto:phase2_realistic_T33
+      --datatier MINIAODSIM
+      --eventcontent MINIAODSIM
+      --geometry ExtendedRun4D110
+      --era Phase2C17I13M9
+      --filein file:{workdir}/output.root
+      --fileout file:stepMINI.root
+      --hltProcess HLTX
+      --mc
+      --no_exec
+      --python_filename reco_step.py
+    - cmsRun reco_step.py
+  ntuplizer_input: file:{workdir}/stepMINI.root
+
+samples:
+  electron:
+    endcap:
+      DY: /cms/store/user/tihsu/example/electron/DY
+      TT: /cms/store/user/tihsu/example/electron/TT
+  photon:
+    endcap:
+      SinglePhoton2To200: /cms/store/user/tihsu/example/photon/SinglePhoton2To200
+      QCDEM: /cms/store/user/tihsu/example/photon/QCDEM
