@@ -5,6 +5,7 @@
 #include "DataFormats/CaloRecHit/interface/CaloClusterFwd.h"
 #include "DataFormats/Common/interface/ValueMap.h"
 #include "DataFormats/EgammaCandidates/interface/Photon.h"
+#include "DataFormats/RecoCandidate/interface/RecoEcalCandidate.h"
 #include "DataFormats/HGCalReco/interface/Trackster.h"
 #include "DataFormats/HGCRecHit/interface/HGCRecHitCollections.h"
 #include "DataFormats/Math/interface/deltaR.h"
@@ -28,6 +29,7 @@
 #include <TTree.h>
 
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -54,14 +56,20 @@ private:
 
   void resetOfflineVectors();
   void resetOnlineBranches();
-  void fillOnlineBranches(const trigger::EgammaObject&, const egammaTiming::GenMatchResult&, int onlineIndex);
+  void resetOnlineVectors();
+  void fillOnlineBranches(const reco::RecoEcalCandidate&,
+                         int candidateIndex,
+                         const trigger::EgammaObject*,
+                         int objectIndex,
+                         const egammaTiming::GenMatchResult&);
   void fillGenBranches(int truthClass,
                        int genIndex,
                        const reco::GenParticle&,
                        const std::pair<int, double>& offlineMatch,
                        const std::pair<int, double>& onlineMatch,
-                       const std::vector<reco::Photon>&,
-                       const std::vector<trigger::EgammaObject>&);
+                        const std::vector<reco::Photon>&,
+                        const std::vector<reco::RecoEcalCandidate>&,
+                        const std::vector<trigger::EgammaObject>&);
 
   int nEvent_;
   int nRun_;
@@ -134,6 +142,35 @@ private:
   double online_sigmaIEtaIEta_;
   double online_rVar_;
   double online_hForHoverE_;
+  int online_candIdx_;
+
+  std::vector<double> online_Trackster_pt_;
+  std::vector<double> online_Trackster_eta_;
+  std::vector<double> online_Trackster_phi_;
+  std::vector<double> online_Trackster_dr_;
+  std::vector<double> online_Trackster_Time_;
+  std::vector<double> online_Trackster_TimeErr_;
+  std::vector<bool> online_Trackster_isSeed_;
+  std::vector<bool> online_Trackster_inCluster_;
+
+  std::vector<double> online_LayerCluster_energy_;
+  std::vector<double> online_LayerCluster_eta_;
+  std::vector<double> online_LayerCluster_phi_;
+  std::vector<double> online_LayerCluster_dr_;
+  std::vector<double> online_LayerCluster_Time_;
+  std::vector<double> online_LayerCluster_TimeErr_;
+  std::vector<bool> online_LayerCluster_isSeed_;
+  std::vector<bool> online_LayerCluster_inCluster_;
+
+  std::vector<double> online_RecHit_dr_;
+  std::vector<double> online_RecHit_eta_;
+  std::vector<double> online_RecHit_phi_;
+  std::vector<int> online_RecHit_layer_;
+  std::vector<double> online_RecHit_energy_;
+  std::vector<double> online_RecHit_time_;
+  std::vector<double> online_RecHit_time_error_;
+  std::vector<bool> online_RecHit_isSeeded_;
+  std::vector<bool> online_RecHit_inCluster_;
 
   int genTree_idx_;
   int genTree_truth_;
@@ -156,6 +193,13 @@ private:
 
   const edm::EDGetTokenT<std::vector<reco::Photon>> photonProducer_;
   const edm::EDGetTokenT<std::vector<trigger::EgammaObject>> onlineProducer_;
+  const edm::EDGetTokenT<std::vector<reco::RecoEcalCandidate>> onlineCandidateProducer_;
+  edm::EDGetTokenT<std::vector<ticl::Trackster>> onlineTracksterToken_;
+  edm::EDGetTokenT<std::vector<reco::CaloCluster>> onlineLayerClusterToken_;
+  const edm::EDGetTokenT<edm::ValueMap<std::pair<float, float>>> onlineLayerClusterTimeToken_;
+  const edm::EDGetTokenT<HGCRecHitCollection> onlineHitsEE_;
+  const edm::EDGetTokenT<HGCRecHitCollection> onlineHitsFH_;
+  const edm::EDGetTokenT<HGCRecHitCollection> onlineHitsBH_;
   const edm::EDGetTokenT<reco::TrackCollection> trackProducer_;
   const edm::EDGetTokenT<reco::BeamSpot> beamspotProducer_;
   const edm::EDGetTokenT<std::vector<reco::Vertex>> vertexProducer_;
@@ -190,6 +234,13 @@ private:
 PhotonComparisonNtuplizer::PhotonComparisonNtuplizer(const edm::ParameterSet& config)
     : photonProducer_{consumes(config.getParameter<edm::InputTag>("photonProducer"))},
       onlineProducer_{consumes(config.getParameter<edm::InputTag>("onlineProducer"))},
+      onlineCandidateProducer_{consumes(config.getParameter<edm::InputTag>("onlineCandidateProducer"))},
+      onlineTracksterToken_{consumes(config.getParameter<edm::InputTag>("onlineTracksterSrc"))},
+      onlineLayerClusterToken_{consumes(config.getParameter<edm::InputTag>("onlineLayerClusterSrc"))},
+      onlineLayerClusterTimeToken_{consumes(config.getParameter<edm::InputTag>("onlineTimeLayerClusterSrc"))},
+      onlineHitsEE_{consumes(config.getParameter<edm::InputTag>("onlineRecHitsEE_Src"))},
+      onlineHitsFH_{consumes(config.getParameter<edm::InputTag>("onlineRecHitsFH_Src"))},
+      onlineHitsBH_{consumes(config.getParameter<edm::InputTag>("onlineRecHitsBH_Src"))},
       trackProducer_{consumes(config.getParameter<edm::InputTag>("trackProducer"))},
       beamspotProducer_{consumes(config.getParameter<edm::InputTag>("BeamspotProducer"))},
       vertexProducer_{consumes(config.getParameter<edm::InputTag>("vertexProducer"))},
@@ -282,6 +333,7 @@ PhotonComparisonNtuplizer::PhotonComparisonNtuplizer(const edm::ParameterSet& co
   onlineTree_->Branch("gen_phi", &online_gen_phi_);
   onlineTree_->Branch("dr_gen", &online_dr_gen_);
   onlineTree_->Branch("objIdx", &online_objIdx_);
+  onlineTree_->Branch("candIdx", &online_candIdx_);
   onlineTree_->Branch("ecalPFIsol_default", &online_ecalPFIsol_);
   onlineTree_->Branch("hcalPFIsol_default", &online_hcalPFIsol_);
   onlineTree_->Branch("hgcalPFIsol_default", &online_hgcalPFIsol_);
@@ -290,6 +342,31 @@ PhotonComparisonNtuplizer::PhotonComparisonNtuplizer(const edm::ParameterSet& co
   onlineTree_->Branch("sigmaIEtaIEta_default", &online_sigmaIEtaIEta_);
   onlineTree_->Branch("rVar_default", &online_rVar_);
   onlineTree_->Branch("hForHoverE_default", &online_hForHoverE_);
+  onlineTree_->Branch("Trackster_dr", &online_Trackster_dr_);
+  onlineTree_->Branch("Trackster_isSeed", &online_Trackster_isSeed_);
+  onlineTree_->Branch("Trackster_inCluster", &online_Trackster_inCluster_);
+  onlineTree_->Branch("Trackster_pt", &online_Trackster_pt_);
+  onlineTree_->Branch("Trackster_eta", &online_Trackster_eta_);
+  onlineTree_->Branch("Trackster_phi", &online_Trackster_phi_);
+  onlineTree_->Branch("Trackster_Time", &online_Trackster_Time_);
+  onlineTree_->Branch("Trackster_TimeErr", &online_Trackster_TimeErr_);
+  onlineTree_->Branch("LayerCluster_dr", &online_LayerCluster_dr_);
+  onlineTree_->Branch("LayerCluster_energy", &online_LayerCluster_energy_);
+  onlineTree_->Branch("LayerCluster_eta", &online_LayerCluster_eta_);
+  onlineTree_->Branch("LayerCluster_phi", &online_LayerCluster_phi_);
+  onlineTree_->Branch("LayerCluster_Time", &online_LayerCluster_Time_);
+  onlineTree_->Branch("LayerCluster_TimeErr", &online_LayerCluster_TimeErr_);
+  onlineTree_->Branch("LayerCluster_isSeed", &online_LayerCluster_isSeed_);
+  onlineTree_->Branch("LayerCluster_inCluster", &online_LayerCluster_inCluster_);
+  onlineTree_->Branch("HGCRecHit_dr", &online_RecHit_dr_);
+  onlineTree_->Branch("HGCRecHit_eta", &online_RecHit_eta_);
+  onlineTree_->Branch("HGCRecHit_phi", &online_RecHit_phi_);
+  onlineTree_->Branch("HGCRecHit_layer", &online_RecHit_layer_);
+  onlineTree_->Branch("HGCRecHit_energy", &online_RecHit_energy_);
+  onlineTree_->Branch("HGCRecHit_Time", &online_RecHit_time_);
+  onlineTree_->Branch("HGCRecHit_TimeError", &online_RecHit_time_error_);
+  onlineTree_->Branch("HGCRecHit_isSeed", &online_RecHit_isSeeded_);
+  onlineTree_->Branch("HGCRecHit_inCluster", &online_RecHit_inCluster_);
 
   genTree_->Branch("nEvent", &nEvent_);
   genTree_->Branch("nRun", &nRun_);
@@ -349,6 +426,7 @@ void PhotonComparisonNtuplizer::resetOfflineVectors() {
 void PhotonComparisonNtuplizer::resetOnlineBranches() {
   online_genIdx_ = -1;
   online_objIdx_ = -1;
+  online_candIdx_ = -1;
   online_matchedToGen_ = 0.;
   online_dr_gen_ = 999.;
   online_gen_pt_ = -1.;
@@ -368,24 +446,58 @@ void PhotonComparisonNtuplizer::resetOnlineBranches() {
   online_hForHoverE_ = -999.;
 }
 
-void PhotonComparisonNtuplizer::fillOnlineBranches(const trigger::EgammaObject& object,
-                                                   const egammaTiming::GenMatchResult& genMatch,
-                                                   int onlineIndex) {
-  resetOnlineBranches();
+void PhotonComparisonNtuplizer::resetOnlineVectors() {
+  online_Trackster_pt_.clear();
+  online_Trackster_eta_.clear();
+  online_Trackster_phi_.clear();
+  online_Trackster_dr_.clear();
+  online_Trackster_Time_.clear();
+  online_Trackster_TimeErr_.clear();
+  online_Trackster_isSeed_.clear();
+  online_Trackster_inCluster_.clear();
+  online_LayerCluster_energy_.clear();
+  online_LayerCluster_eta_.clear();
+  online_LayerCluster_phi_.clear();
+  online_LayerCluster_dr_.clear();
+  online_LayerCluster_Time_.clear();
+  online_LayerCluster_TimeErr_.clear();
+  online_LayerCluster_isSeed_.clear();
+  online_LayerCluster_inCluster_.clear();
+  online_RecHit_dr_.clear();
+  online_RecHit_eta_.clear();
+  online_RecHit_phi_.clear();
+  online_RecHit_layer_.clear();
+  online_RecHit_energy_.clear();
+  online_RecHit_time_.clear();
+  online_RecHit_time_error_.clear();
+  online_RecHit_isSeeded_.clear();
+  online_RecHit_inCluster_.clear();
+}
 
-  online_objIdx_ = onlineIndex;
-  online_pt_ = object.et();
-  online_eta_ = object.eta();
-  online_phi_ = object.phi();
-  online_energy_ = object.energy();
-  online_ecalPFIsol_ = egammaTiming::getEgammaVar(object, "hltEgammaEcalPFClusterIsoUnseeded");
-  online_hcalPFIsol_ = egammaTiming::getEgammaVar(object, "hltEgammaHcalPFClusterIsoUnseeded");
-  online_hgcalPFIsol_ = egammaTiming::getEgammaVar(object, "hltEgammaHGCalLayerClusterIsoUnseeded");
-  online_trkIsol_ = egammaTiming::getEgammaVar(object, "hltEgammaHollowTrackIsoUnseeded");
-  online_r9_ = egammaTiming::getEgammaVar(object, "hltEgammaR9Unseeded");
-  online_sigmaIEtaIEta_ = egammaTiming::getEgammaVar(object, "hltEgammaClusterShapeUnseeded_sigmaIEtaIEta5x5");
-  online_rVar_ = egammaTiming::getEgammaVar(object, "hltEgammaHGCALIDVarsUnseeded_rVar");
-  online_hForHoverE_ = egammaTiming::getEgammaVar(object, "hltEgammaHGCALIDVarsUnseeded_hForHOverE");
+void PhotonComparisonNtuplizer::fillOnlineBranches(const reco::RecoEcalCandidate& candidate,
+                                                   int candidateIndex,
+                                                   const trigger::EgammaObject* object,
+                                                   int objectIndex,
+                                                   const egammaTiming::GenMatchResult& genMatch) {
+  resetOnlineBranches();
+  resetOnlineVectors();
+
+  online_candIdx_ = candidateIndex;
+  online_objIdx_ = objectIndex;
+  online_pt_ = candidate.et();
+  online_eta_ = candidate.eta();
+  online_phi_ = candidate.phi();
+  online_energy_ = candidate.energy();
+  if (object != nullptr) {
+    online_ecalPFIsol_ = egammaTiming::getEgammaVar(*object, "hltEgammaEcalPFClusterIsoUnseeded");
+    online_hcalPFIsol_ = egammaTiming::getEgammaVar(*object, "hltEgammaHcalPFClusterIsoUnseeded");
+    online_hgcalPFIsol_ = egammaTiming::getEgammaVar(*object, "hltEgammaHGCalLayerClusterIsoUnseeded");
+    online_trkIsol_ = egammaTiming::getEgammaVar(*object, "hltEgammaHollowTrackIsoUnseeded");
+    online_r9_ = egammaTiming::getEgammaVar(*object, "hltEgammaR9Unseeded");
+    online_sigmaIEtaIEta_ = egammaTiming::getEgammaVar(*object, "hltEgammaClusterShapeUnseeded_sigmaIEtaIEta5x5");
+    online_rVar_ = egammaTiming::getEgammaVar(*object, "hltEgammaHGCALIDVarsUnseeded_rVar");
+    online_hForHoverE_ = egammaTiming::getEgammaVar(*object, "hltEgammaHGCALIDVarsUnseeded_hForHOverE");
+  }
   online_genIdx_ = genMatch.index;
   online_matchedToGen_ = genMatch.truthClass;
   online_dr_gen_ = genMatch.dr;
@@ -400,6 +512,7 @@ void PhotonComparisonNtuplizer::fillGenBranches(int truthClass,
                                                 const std::pair<int, double>& offlineMatch,
                                                 const std::pair<int, double>& onlineMatch,
                                                 const std::vector<reco::Photon>& offlinePhotons,
+                                                const std::vector<reco::RecoEcalCandidate>& onlineCandidates,
                                                 const std::vector<trigger::EgammaObject>& onlineObjects) {
   genTree_idx_ = genIndex;
   genTree_truth_ = truthClass;
@@ -416,13 +529,19 @@ void PhotonComparisonNtuplizer::fillGenBranches(int truthClass,
 
   genTree_online_idx_ = onlineMatch.first;
   genTree_online_exists_ = onlineMatch.first >= 0 ? 1. : 0.;
-  genTree_online_pt_ = onlineMatch.first >= 0 ? onlineObjects[onlineMatch.first].et() : -1.;
-  genTree_online_eta_ = onlineMatch.first >= 0 ? onlineObjects[onlineMatch.first].eta() : -999.;
-  genTree_online_phi_ = onlineMatch.first >= 0 ? onlineObjects[onlineMatch.first].phi() : -999.;
+  genTree_online_pt_ = onlineMatch.first >= 0 ? onlineCandidates[onlineMatch.first].et() : -1.;
+  genTree_online_eta_ = onlineMatch.first >= 0 ? onlineCandidates[onlineMatch.first].eta() : -999.;
+  genTree_online_phi_ = onlineMatch.first >= 0 ? onlineCandidates[onlineMatch.first].phi() : -999.;
   genTree_online_dr_ = onlineMatch.second;
-  genTree_online_hgcalIso_ =
-      onlineMatch.first >= 0 ? egammaTiming::getEgammaVar(onlineObjects[onlineMatch.first], "hltEgammaHGCalLayerClusterIsoUnseeded")
-                             : -999.;
+  genTree_online_hgcalIso_ = -999.;
+  if (onlineMatch.first >= 0) {
+    const auto objectMatch =
+        egammaTiming::findBestRecoMatch(onlineCandidates[onlineMatch.first].eta(), onlineCandidates[onlineMatch.first].phi(), onlineObjects, gen_deltaR_);
+    if (objectMatch.first >= 0) {
+      genTree_online_hgcalIso_ =
+          egammaTiming::getEgammaVar(onlineObjects[objectMatch.first], "hltEgammaHGCalLayerClusterIsoUnseeded");
+    }
+  }
 
   genTree_->Fill();
 }
@@ -437,12 +556,16 @@ void PhotonComparisonNtuplizer::analyze(const edm::Event& iEvent, const edm::Eve
 
   const auto photonHandle = iEvent.getHandle(photonProducer_);
   const auto onlineHandle = iEvent.getHandle(onlineProducer_);
+  const auto onlineCandidateHandle = iEvent.getHandle(onlineCandidateProducer_);
   const auto vertexHandle = iEvent.getHandle(vertexProducer_);
   const auto trackHandle = iEvent.getHandle(trackProducer_);
   const auto genParticles = iEvent.getHandle(genParticleProducer_);
   const auto hitsEEHandle = iEvent.getHandle(hitsEE_);
   const auto hitsFHHandle = iEvent.getHandle(hitsFH_);
   const auto hitsBHHandle = iEvent.getHandle(hitsBH_);
+  const auto onlineHitsEEHandle = iEvent.getHandle(onlineHitsEE_);
+  const auto onlineHitsFHHandle = iEvent.getHandle(onlineHitsFH_);
+  const auto onlineHitsBHHandle = iEvent.getHandle(onlineHitsBH_);
   const auto& beamPoint = iEvent.get(beamspotProducer_).position();
   const auto& mtdt0 = iEvent.get(mtdt0Token_);
   const auto& mtdSigmat0 = iEvent.get(mtdSigmat0Token_);
@@ -455,6 +578,23 @@ void PhotonComparisonNtuplizer::analyze(const edm::Event& iEvent, const edm::Eve
   edm::Handle<std::vector<reco::CaloCluster>> layerClusterHandle;
   iEvent.getByToken(layerClusterToken_, layerClusterHandle);
   const std::vector<reco::CaloCluster>* layerClusters = layerClusterHandle.isValid() ? layerClusterHandle.product() : nullptr;
+
+  std::vector<ticl::Trackster> onlineTracksters;
+  {
+    edm::Handle<std::vector<ticl::Trackster>> handle;
+    iEvent.getByToken(onlineTracksterToken_, handle);
+    if (handle.isValid()) {
+      onlineTracksters = *handle;
+    }
+  }
+
+  edm::Handle<std::vector<reco::CaloCluster>> onlineLayerClusterHandle;
+  iEvent.getByToken(onlineLayerClusterToken_, onlineLayerClusterHandle);
+  const std::vector<reco::CaloCluster>* onlineLayerClusters =
+      onlineLayerClusterHandle.isValid() ? onlineLayerClusterHandle.product() : nullptr;
+
+  edm::Handle<edm::ValueMap<std::pair<float, float>>> onlineLayerClusterTimeHandle;
+  iEvent.getByToken(onlineLayerClusterTimeToken_, onlineLayerClusterTimeHandle);
 
   const std::vector<reco::Vertex> vertices = *vertexHandle;
   reco::Vertex primaryVertex = egammaTiming::getPrimaryVertex(vertices, vtxN_);
@@ -480,13 +620,14 @@ void PhotonComparisonNtuplizer::analyze(const edm::Event& iEvent, const edm::Eve
 
   const auto& offlinePhotons = *photonHandle;
   const auto& onlineObjects = *onlineHandle;
+  const auto& onlineCandidates = *onlineCandidateHandle;
 
   for (unsigned int index = 0; index < selectedGenIndices.size(); ++index) {
     const int genIndex = selectedGenIndices[index];
     const auto& particle = (*genParticles)[genIndex];
     const auto offlineMatch = egammaTiming::findBestRecoMatch(particle.eta(), particle.phi(), offlinePhotons, gen_deltaR_);
-    const auto onlineMatch = egammaTiming::findBestRecoMatch(particle.eta(), particle.phi(), onlineObjects, gen_deltaR_);
-    fillGenBranches(selectedTruthClasses[index], genIndex, particle, offlineMatch, onlineMatch, offlinePhotons, onlineObjects);
+    const auto onlineMatch = egammaTiming::findBestRecoMatch(particle.eta(), particle.phi(), onlineCandidates, gen_deltaR_);
+    fillGenBranches(selectedTruthClasses[index], genIndex, particle, offlineMatch, onlineMatch, offlinePhotons, onlineCandidates, onlineObjects);
   }
 
   for (unsigned int i = 0; i < offlinePhotons.size(); ++i) {
@@ -682,15 +823,149 @@ void PhotonComparisonNtuplizer::analyze(const edm::Event& iEvent, const edm::Eve
     offlineTree_->Fill();
   }
 
-  for (unsigned int i = 0; i < onlineObjects.size(); ++i) {
-    const auto genMatch = isMC_ ? egammaTiming::findBestGenMatch(onlineObjects[i].eta(),
-                                                                 onlineObjects[i].phi(),
+  for (unsigned int i = 0; i < onlineCandidates.size(); ++i) {
+    const auto genMatch = isMC_ ? egammaTiming::findBestGenMatch(onlineCandidates[i].eta(),
+                                                                 onlineCandidates[i].phi(),
                                                                  *genParticles,
                                                                  22,
                                                                  gen_deltaR_,
                                                                  egammaTiming::classifyPhotonTruth)
                                 : egammaTiming::GenMatchResult();
-    fillOnlineBranches(onlineObjects[i], genMatch, i);
+    const auto onlineObjectMatch =
+        egammaTiming::findBestRecoMatch(onlineCandidates[i].eta(), onlineCandidates[i].phi(), onlineObjects, gen_deltaR_);
+    const trigger::EgammaObject* matchedObject = onlineObjectMatch.first >= 0 ? &onlineObjects[onlineObjectMatch.first] : nullptr;
+    fillOnlineBranches(onlineCandidates[i], i, matchedObject, onlineObjectMatch.first, genMatch);
+
+    if (onlineLayerClusters != nullptr) {
+      const auto& candidate = onlineCandidates[i];
+      const reco::SuperClusterRef scRef = candidate.superCluster();
+
+      if (scRef.isNonnull() && std::abs(candidate.eta()) >= 1.479) {
+        const reco::SuperCluster& hgcalSC = *scRef;
+        const auto& seedHitsAndFractions = hgcalSC.seed()->hitsAndFractions();
+        const auto& egClusters = hgcalSC.clusters();
+
+        std::vector<bool> layerClusterIsSeed(onlineLayerClusters->size(), false);
+        std::vector<bool> layerClusterInCluster(onlineLayerClusters->size(), false);
+
+        for (size_t clusterIndex = 0; clusterIndex < onlineLayerClusters->size(); ++clusterIndex) {
+          const auto& cluster = (*onlineLayerClusters)[clusterIndex];
+          layerClusterIsSeed[clusterIndex] = egammaTiming::haveCommonHit(cluster.hitsAndFractions(), seedHitsAndFractions);
+
+          for (const auto& egCluster : egClusters) {
+            if (egammaTiming::haveCommonHit(cluster.hitsAndFractions(), egCluster->hitsAndFractions())) {
+              layerClusterInCluster[clusterIndex] = true;
+              break;
+            }
+          }
+
+          const double clusterDr = reco::deltaR(online_eta_, online_phi_, cluster.eta(), cluster.phi());
+          if (clusterDr >= extRadius_) {
+            continue;
+          }
+
+          online_LayerCluster_dr_.push_back(clusterDr);
+          online_LayerCluster_energy_.push_back(cluster.energy());
+          online_LayerCluster_eta_.push_back(cluster.eta());
+          online_LayerCluster_phi_.push_back(cluster.phi());
+          if (onlineLayerClusterTimeHandle.isValid()) {
+            edm::Ref<reco::CaloClusterCollection> clusterRef(onlineLayerClusterHandle, clusterIndex);
+            const auto timePair = (*onlineLayerClusterTimeHandle)[clusterRef];
+            online_LayerCluster_Time_.push_back(timePair.first);
+            online_LayerCluster_TimeErr_.push_back(timePair.second);
+          } else {
+            online_LayerCluster_Time_.push_back(-99.);
+            online_LayerCluster_TimeErr_.push_back(-1.);
+          }
+          online_LayerCluster_isSeed_.push_back(layerClusterIsSeed[clusterIndex]);
+          online_LayerCluster_inCluster_.push_back(layerClusterInCluster[clusterIndex]);
+        }
+
+        for (const auto& trackster : onlineTracksters) {
+          if (trackster.vertices().empty()) {
+            continue;
+          }
+          const auto momentum = trackster.eigenvectors(0);
+          const double tracksterDr = reco::deltaR(online_eta_, online_phi_, momentum.eta(), momentum.phi());
+          if (tracksterDr >= extRadius_) {
+            continue;
+          }
+
+          bool isSeedTrackster = false;
+          bool tracksterInCluster = false;
+          for (const auto layerClusterId : trackster.vertices()) {
+            if (layerClusterId >= layerClusterIsSeed.size()) {
+              continue;
+            }
+            isSeedTrackster = isSeedTrackster || layerClusterIsSeed[layerClusterId];
+            tracksterInCluster = tracksterInCluster || layerClusterInCluster[layerClusterId];
+          }
+
+          online_Trackster_dr_.push_back(tracksterDr);
+          online_Trackster_pt_.push_back(trackster.raw_pt());
+          online_Trackster_eta_.push_back(momentum.eta());
+          online_Trackster_phi_.push_back(momentum.phi());
+          online_Trackster_Time_.push_back(trackster.time());
+          online_Trackster_TimeErr_.push_back(trackster.timeError());
+          online_Trackster_isSeed_.push_back(isSeedTrackster);
+          online_Trackster_inCluster_.push_back(tracksterInCluster);
+        }
+
+        auto fillOnlineRecHit = [this, &seedHitsAndFractions, &egClusters](const HGCRecHit& hit) {
+          const GlobalPoint position = recHitTools_.getPosition(hit.id());
+          const float eta = recHitTools_.getEta(position, 0);
+          const float phi = recHitTools_.getPhi(position);
+          const float deltaR = reco::deltaR(online_eta_, online_phi_, eta, phi);
+          if (deltaR >= extRadius_) {
+            return;
+          }
+
+          bool isSeeded = false;
+          bool inCluster = false;
+          for (const auto& seedHit : seedHitsAndFractions) {
+            if (seedHit.first == hit.id()) {
+              isSeeded = true;
+              break;
+            }
+          }
+
+          for (auto clusterIt = egClusters.begin(); clusterIt != egClusters.end() && !inCluster; ++clusterIt) {
+            for (const auto& clusterHit : (*clusterIt)->hitsAndFractions()) {
+              if (clusterHit.first == hit.id()) {
+                inCluster = true;
+                break;
+              }
+            }
+          }
+
+          online_RecHit_dr_.push_back(deltaR);
+          online_RecHit_eta_.push_back(eta);
+          online_RecHit_phi_.push_back(phi);
+          online_RecHit_layer_.push_back(recHitTools_.getLayerWithOffset(hit.id()));
+          online_RecHit_energy_.push_back(hit.energy());
+          online_RecHit_time_.push_back(hit.time());
+          online_RecHit_time_error_.push_back(hit.timeError());
+          online_RecHit_isSeeded_.push_back(isSeeded);
+          online_RecHit_inCluster_.push_back(inCluster);
+        };
+
+        if (onlineHitsEEHandle.isValid()) {
+          for (const auto& hit : *onlineHitsEEHandle) {
+            fillOnlineRecHit(hit);
+          }
+        }
+        if (onlineHitsFHHandle.isValid()) {
+          for (const auto& hit : *onlineHitsFHHandle) {
+            fillOnlineRecHit(hit);
+          }
+        }
+        if (onlineHitsBHHandle.isValid()) {
+          for (const auto& hit : *onlineHitsBHHandle) {
+            fillOnlineRecHit(hit);
+          }
+        }
+      }
+    }
     onlineTree_->Fill();
   }
 }
@@ -699,6 +974,13 @@ void PhotonComparisonNtuplizer::fillDescriptions(edm::ConfigurationDescriptions&
   edm::ParameterSetDescription desc;
   desc.add<edm::InputTag>("photonProducer", edm::InputTag("photonsHGC"));
   desc.add<edm::InputTag>("onlineProducer", edm::InputTag("hltEgammaHLTExtra", "Unseeded", "HLT"));
+  desc.add<edm::InputTag>("onlineCandidateProducer", edm::InputTag("hltEgammaCandidatesUnseeded", "", "HLT"));
+  desc.add<edm::InputTag>("onlineTracksterSrc", edm::InputTag("hltTiclCandidate", "", "HLT"));
+  desc.add<edm::InputTag>("onlineLayerClusterSrc", edm::InputTag("hltMergeLayerClusters", "", "HLT"));
+  desc.add<edm::InputTag>("onlineTimeLayerClusterSrc", edm::InputTag("hltMergeLayerClusters", "timeLayerCluster", "HLT"));
+  desc.add<edm::InputTag>("onlineRecHitsEE_Src", edm::InputTag("hltHGCalRecHit", "HGCEERecHits", "HLT"));
+  desc.add<edm::InputTag>("onlineRecHitsFH_Src", edm::InputTag("hltHGCalRecHit", "HGCHEFRecHits", "HLT"));
+  desc.add<edm::InputTag>("onlineRecHitsBH_Src", edm::InputTag("hltHGCalRecHit", "HGCHEBRecHits", "HLT"));
   desc.add<edm::InputTag>("trackProducer", edm::InputTag("generalTracks"));
   desc.add<edm::InputTag>("BeamspotProducer", edm::InputTag("offlineBeamSpot"));
   desc.add<edm::InputTag>("vertexProducer", edm::InputTag("offlineSlimmedPrimaryVertices4D"));

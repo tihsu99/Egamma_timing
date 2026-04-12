@@ -142,8 +142,13 @@ def resolve_sample_files(sample_spec, default_host):
 
 def replace_placeholders(template, values):
   result = template
-  for key, value in values.items():
-    result = result.replace("{" + key + "}", str(value))
+  for _ in range(5):
+    updated = result
+    for key, value in values.items():
+      updated = updated.replace("{" + key + "}", str(value))
+    if updated == result:
+      break
+    result = updated
   return result
 
 
@@ -175,6 +180,8 @@ def build_production_commands(config, args, particle, region, sample, variant, i
   timing_dir = config["timing-dir"]
   comparison_cfg = particle_cfg["ntuplizer_cfg"]
   online_label = particle_cfg["online_label"]
+  online_candidate_label = variant_cfg.get("online_candidate_label", "hltEgammaCandidatesUnseeded::HLTX")
+  online_trackster_label = variant_cfg.get("online_trackster_label", "hltTiclCandidate::HLTX")
   comparison_input = workflow_cfg["ntuplizer_input"]
 
   placeholders = {
@@ -192,13 +199,15 @@ def build_production_commands(config, args, particle, region, sample, variant, i
       "comparison_cfg": comparison_cfg,
       "offline_label": offline_label,
       "online_label": online_label,
+      "online_candidate_label": online_candidate_label,
+      "online_trackster_label": online_trackster_label,
       "comparison_input": comparison_input,
       "output_file": output_file,
       "workdir": "$WORKDIR",
       "hlt_output": workflow_cfg.get("hlt_output", "step_hlt.root"),
       "reco_output": workflow_cfg.get("reco_output", "step_reco.root"),
       "reco_output_commands": workflow_cfg.get("reco_output_commands", ""),
-      "hlt_customise": workflow_cfg.get("hlt_customise", ""),
+      "hlt_customise_commands": workflow_cfg.get("hlt_customise_commands", ""),
       }
 
   commands = []
@@ -213,13 +222,16 @@ def build_production_commands(config, args, particle, region, sample, variant, i
 
   commands.append(
       "cmsRun {timing_dir}/python/{comparison_cfg} inputFiles={nt_input} outDir=$WORKDIR outFileNumber={file_index} "
-      "{label_arg} onlineLabel={online_label}".format(
+      "{label_arg} onlineLabel={online_label} onlineCandidateLabel={online_candidate_label} "
+      "onlineTracksterLabel={online_trackster_label}".format(
           timing_dir=timing_dir,
           comparison_cfg=comparison_cfg,
           nt_input=ntuplizer_input,
           file_index=file_index,
           label_arg=label_arg,
           online_label=online_label,
+          online_candidate_label=online_candidate_label,
+          online_trackster_label=online_trackster_label,
       )
   )
   if args.max_events is not None:

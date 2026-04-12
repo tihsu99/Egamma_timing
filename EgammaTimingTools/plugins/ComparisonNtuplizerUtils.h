@@ -9,6 +9,7 @@
 #include <cmath>
 #include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace egammaTiming {
@@ -42,6 +43,18 @@ inline float getEgammaVar(const trigger::EgammaObject& object, const std::string
   int missing = 0;
   const float value = object.var(key, missing);
   return missing ? fallback : value;
+}
+
+template <typename HitCollectionA, typename HitCollectionB>
+inline bool haveCommonHit(const HitCollectionA& hitsA, const HitCollectionB& hitsB) {
+  for (const auto& hitA : hitsA) {
+    for (const auto& hitB : hitsB) {
+      if (hitA.first == hitB.first) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 inline int classifyElectronTruth(const reco::GenParticle& particle) {

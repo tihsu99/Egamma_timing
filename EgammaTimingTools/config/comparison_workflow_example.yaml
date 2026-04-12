@@ -7,9 +7,19 @@ sample-config: comparison_samples_example.yaml
 
 variants:
   v4:
+    # Official HLT_75e33 uses hltEgammaCandidatesUnseeded with the default
+    # HGCal supercluster chain, whose PFCluster builder consumes
+    # hltTiclTrackstersCLUE3DHigh.
     proc_modifier: ""
+    online_candidate_label: hltEgammaCandidatesUnseeded::HLTX
+    online_trackster_label: hltTiclTrackstersCLUE3DHigh::HLTX
   v5:
+    # With --procModifiers ticl_v5, the HLT menu switches the endcap egamma
+    # candidate chain to hltTiclEGammaSuperClusterProducerUnseeded and the
+    # underlying HGCal PFCluster builder consumes hltTiclCandidate.
     proc_modifier: "--procModifiers ticl_v5"
+    online_candidate_label: hltEgammaCandidatesUnseeded::HLTX
+    online_trackster_label: hltTiclCandidate::HLTX
 
 particles:
   electron:
@@ -30,10 +40,30 @@ workflow:
   # 1. rerun HLT-side products in process HLTX
   # 2. rerun offline RAW2DIGI/L1Reco/RECO/RECOSIM/PAT on the HLT output
   # Keep all heavy intermediates in $WORKDIR and copy out only the comparison ntuple.
-  hlt_customise: --customise EGammaReco/EGammaNtuples/customiseHLTForEGammaNtuples.customiseHLTFor{particle_type}Ntuples
+  hlt_customise_commands: >-
+    process.load('RecoEgamma.EgammaHLTProducers.hltEgammaHLTExtra_cfi');
+    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltEgammaHLTExtra_*_*');
+    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltEgammaCandidatesUnseeded_*_*');
+    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltHGCalRecHit_*_*');
+    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltMergeLayerClusters_*_*');
+    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltTiclCandidate_*_*');
+    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltTiclTrackstersCLUE3DHigh_*_*');
+    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltParticleFlowSuperClusterECALUnseeded_*_*');
+    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltParticleFlowSuperClusterHGCalFromTICLUnseeded_*_*');
+    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltTiclEGammaSuperClusterProducerUnseeded_*_*');
+    process.FEVTDEBUGHLToutput_step = cms.EndPath(process.hltEgammaHLTExtra * process.FEVTDEBUGHLToutput)
   hlt_output: step_hlt.root
   reco_output: step_reco.root
   reco_output_commands: >-
+    process.MINIAODSIMoutput.outputCommands.append('keep *_hltEgammaHLTExtra_*_HLTX');
+    process.MINIAODSIMoutput.outputCommands.append('keep *_hltEgammaCandidatesUnseeded_*_HLTX');
+    process.MINIAODSIMoutput.outputCommands.append('keep *_hltHGCalRecHit_*_HLTX');
+    process.MINIAODSIMoutput.outputCommands.append('keep *_hltMergeLayerClusters_*_HLTX');
+    process.MINIAODSIMoutput.outputCommands.append('keep *_hltTiclCandidate_*_HLTX');
+    process.MINIAODSIMoutput.outputCommands.append('keep *_hltTiclTrackstersCLUE3DHigh_*_HLTX');
+    process.MINIAODSIMoutput.outputCommands.append('keep *_hltParticleFlowSuperClusterECALUnseeded_*_HLTX');
+    process.MINIAODSIMoutput.outputCommands.append('keep *_hltParticleFlowSuperClusterHGCalFromTICLUnseeded_*_HLTX');
+    process.MINIAODSIMoutput.outputCommands.append('keep *_hltTiclEGammaSuperClusterProducerUnseeded_*_HLTX');
     process.MINIAODSIMoutput.outputCommands.append('keep recoGsfElectron*_gedGsfElectron*_*_*');
     process.MINIAODSIMoutput.outputCommands.append('keep recoGsfTracks_electronGsfTracks_*_*');
     process.MINIAODSIMoutput.outputCommands.append('keep recoPhoton*_gedPhoton*_*_*');
@@ -63,7 +93,7 @@ workflow:
       --era Phase2C17I13M9
       --eventcontent FEVTDEBUGHLT
       --customise SLHCUpgradeSimulations/Configuration/aging.customise_aging_1000
-      {hlt_customise}
+      --customise_commands "{hlt_customise_commands}"
       {proc_modifier}
       --filein {input_file}
       --fileout file:{workdir}/{hlt_output}

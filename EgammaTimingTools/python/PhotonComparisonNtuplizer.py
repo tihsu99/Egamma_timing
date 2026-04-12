@@ -17,6 +17,8 @@ options = VarParsing.VarParsing("analysis")
 options.register("sourceFile", "", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "File containing list of input files")
 options.register("photonLabel", "photonsHGC", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "Offline photon collection")
 options.register("onlineLabel", "hltEgammaHLTExtra:Unseeded:HLT", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "Online EGammaObject collection")
+options.register("onlineCandidateLabel", "hltEgammaCandidatesUnseeded::HLTX", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "Online RecoEcalCandidate collection")
+options.register("onlineTracksterLabel", "hltTiclCandidate::HLTX", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "Online HLT trackster collection")
 options.register("outDir", "", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "Output directory")
 options.register("outFileNumber", -1, VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.int, "Output file number")
 options.parseArguments()
@@ -55,6 +57,13 @@ process.ntuplizer = cms.EDAnalyzer(
     "PhotonComparisonNtuplizer",
     photonProducer=cms.InputTag(options.photonLabel),
     onlineProducer=cms.InputTag(*options.onlineLabel.split(":")),
+    onlineCandidateProducer=cms.InputTag(*options.onlineCandidateLabel.split(":")),
+    onlineTracksterSrc=cms.InputTag(*options.onlineTracksterLabel.split(":")),
+    onlineLayerClusterSrc=cms.InputTag("hltMergeLayerClusters", "", "HLTX"),
+    onlineTimeLayerClusterSrc=cms.InputTag("hltMergeLayerClusters", "timeLayerCluster", "HLTX"),
+    onlineRecHitsEE_Src=cms.InputTag("hltHGCalRecHit", "HGCEERecHits", "HLTX"),
+    onlineRecHitsFH_Src=cms.InputTag("hltHGCalRecHit", "HGCHEFRecHits", "HLTX"),
+    onlineRecHitsBH_Src=cms.InputTag("hltHGCalRecHit", "HGCHEBRecHits", "HLTX"),
     trackProducer=cms.InputTag("generalTracks"),
     mtdt0=cms.InputTag("tofPID:t0"),
     mtdSigmat0=cms.InputTag("tofPID:sigmat0"),
