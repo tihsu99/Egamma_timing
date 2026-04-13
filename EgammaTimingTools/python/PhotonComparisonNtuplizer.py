@@ -6,10 +6,10 @@ from Configuration.StandardSequences.Eras import eras
 
 process = cms.Process("PhotonComparisonNtuplizer", eras.Phase2C17I13M9)
 
-process.load("Configuration.Geometry.GeometryExtended2026D110Reco_cff")
+process.load("Configuration.Geometry.GeometryExtendedRun4D110Reco_cff")
 process.load("FWCore.MessageService.MessageLogger_cfi")
 process.load("Configuration.StandardSequences.FrontierConditions_GlobalTag_cff")
-process.GlobalTag = GlobalTag(process.GlobalTag, "auto:phase2_realistic_T21", "")
+process.GlobalTag = GlobalTag(process.GlobalTag, "auto:phase2_realistic_T33", "")
 
 import FWCore.ParameterSet.VarParsing as VarParsing
 
