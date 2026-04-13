@@ -5,6 +5,11 @@ from urllib.parse import urlparse
 
 import yaml
 
+try:
+  from tqdm import tqdm
+except ImportError:
+  tqdm = None
+
 
 def check_dir(path):
   if not os.path.exists(path):
@@ -377,7 +382,11 @@ def run_merge_jobs_local(config, args):
   timing_dir = config["timing-dir"]
   merged_outputs = []
   merged_jobs = 0
-  for (particle, region, sample, file_name) in common_keys:
+  merge_iter = common_keys
+  if tqdm is not None and not args.test:
+    merge_iter = tqdm(common_keys, desc="Merging comparison ntuples", unit="file")
+
+  for index, (particle, region, sample, file_name) in enumerate(merge_iter, start=1):
     if not accept_sample(args, particle, region, sample):
       continue
     if args.max_files is not None and merged_jobs >= args.max_files:
@@ -393,8 +402,11 @@ def run_merge_jobs_local(config, args):
         timing_dir, v4_file, v5_file, output_file
     )
     if args.test:
+      print("[{}/{}] {}".format(index, len(common_keys), file_name))
       print(command)
     else:
+      if tqdm is None:
+        print("[{}/{}] Merging {}".format(index, len(common_keys), file_name))
       run_command(command)
     merged_outputs.append(output_file)
     merged_jobs += 1
