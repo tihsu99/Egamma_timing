@@ -1,4 +1,5 @@
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 import subprocess
 from urllib.parse import urlparse
@@ -380,17 +381,10 @@ def run_merge_jobs_local(config, args):
     print("Skipping {} v5-only ntuple(s) without v4 match".format(len(v5_only)))
 
   timing_dir = config["timing-dir"]
-  merged_outputs = []
-  merged_jobs = 0
-  merge_iter = common_keys
-  if tqdm is not None and not args.test:
-    merge_iter = tqdm(common_keys, desc="Merging comparison ntuples", unit="file")
-
-  for index, (particle, region, sample, file_name) in enumerate(merge_iter, start=1):
+  tasks = []
+  for (particle, region, sample, file_name) in common_keys:
     if not accept_sample(args, particle, region, sample):
       continue
-    if args.max_files is not None and merged_jobs >= args.max_files:
-      return merged_outputs
     v4_file = v4_files[(particle, region, sample, file_name)]
     v5_file = v5_files[(particle, region, sample, file_name)]
     output_dir = os.path.join(args.outdir, particle, region, sample)
@@ -401,15 +395,56 @@ def run_merge_jobs_local(config, args):
     command = "python3 {}/analysis/merge_comparison_trees.py --v4 {} --v5 {} --out {}".format(
         timing_dir, v4_file, v5_file, output_file
     )
-    if args.test:
-      print("[{}/{}] {}".format(index, len(common_keys), file_name))
+    tasks.append((particle, region, sample, file_name, output_file, command))
+    if args.max_files is not None and len(tasks) >= args.max_files:
+      break
+
+  if args.test:
+    for index, (_, _, _, file_name, _, command) in enumerate(tasks, start=1):
+      print("[{}/{}] {}".format(index, len(tasks), file_name))
       print(command)
-    else:
+    return [task[4] for task in tasks]
+
+  if not tasks:
+    return []
+
+  merged_outputs = []
+  if args.n_workers <= 1:
+    merge_iter = tasks
+    if tqdm is not None:
+      merge_iter = tqdm(tasks, desc="Merging comparison ntuples", unit="file")
+    for index, (_, _, _, file_name, output_file, command) in enumerate(merge_iter, start=1):
       if tqdm is None:
-        print("[{}/{}] Merging {}".format(index, len(common_keys), file_name))
+        print("[{}/{}] Merging {}".format(index, len(tasks), file_name))
       run_command(command)
-    merged_outputs.append(output_file)
-    merged_jobs += 1
+      merged_outputs.append(output_file)
+    return merged_outputs
+
+  progress = None
+  if tqdm is not None:
+    progress = tqdm(total=len(tasks), desc="Merging comparison ntuples", unit="file")
+
+  with ThreadPoolExecutor(max_workers=args.n_workers) as executor:
+    futures = {
+        executor.submit(run_command, command): (file_name, output_file)
+        for _, _, _, file_name, output_file, command in tasks
+    }
+    for future in as_completed(futures):
+      file_name, output_file = futures[future]
+      try:
+        future.result()
+      except Exception:
+        if progress is not None:
+          progress.close()
+        raise RuntimeError("Failed while merging {}".format(file_name))
+      merged_outputs.append(output_file)
+      if progress is not None:
+        progress.update(1)
+      else:
+        print("Merged {}".format(file_name))
+
+  if progress is not None:
+    progress.close()
   return merged_outputs
 
 
@@ -433,6 +468,7 @@ if __name__ == "__main__":
   parser.add_argument("--sample", default=None, type=str)
   parser.add_argument("--max-files", default=None, type=int)
   parser.add_argument("--max-events", default=None, type=int)
+  parser.add_argument("--n-workers", default=1, type=int)
   parser.add_argument("--check", action="store_true")
   parser.add_argument("--test", action="store_true")
   args = parser.parse_args()
