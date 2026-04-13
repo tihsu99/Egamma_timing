@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import glob
 import os
 
@@ -80,6 +81,14 @@ def seed_time_from_tracksters(trackster_pt, trackster_dr, trackster_time, tracks
   return ak.fill_none(weighted, -99.0)
 
 
+def seed_time_from_layerclusters(layercluster_energy, layercluster_dr, layercluster_time, layercluster_is_seed):
+  seed_clusters = layercluster_is_seed & (layercluster_energy > 0.5) & (layercluster_dr < 0.3) & (layercluster_time > -90.0)
+  weighted_sum = ak.sum(layercluster_time[seed_clusters] * layercluster_energy[seed_clusters], axis=1)
+  energy_sum = ak.sum(layercluster_energy[seed_clusters], axis=1)
+  weighted = ak.where(energy_sum > 0, weighted_sum / energy_sum, -99.0)
+  return ak.fill_none(weighted, -99.0)
+
+
 def compute_isolation(dr, values, is_seed, in_cluster, time_wrt_ref, ext_dr=0.15, int_dr=0.0,
                       energy_cut=0.0, dt_cut=9999.0, veto_seed=False, veto_cluster=False):
   selection = (dr < ext_dr) & (dr > int_dr) & (values > energy_cut)
@@ -117,6 +126,9 @@ def scenario_collections(events, scenario, particle):
       events["Trackster_isSeed"],
   )
   payload["seed_time"] = ak.to_numpy(seed_time)
+  references = {
+      "seed": seed_time,
+  }
 
   collections = {
       "trackster": {
@@ -143,10 +155,24 @@ def scenario_collections(events, scenario, particle):
         "isSeed": events["LayerCluster_isSeed"],
         "inCluster": events["LayerCluster_inCluster"],
     }
+    layercluster_seed_time = seed_time_from_layerclusters(
+        events["LayerCluster_energy"],
+        events["LayerCluster_dr"],
+        events["LayerCluster_Time"],
+        events["LayerCluster_isSeed"],
+    )
+    payload["layercluster_seed_time"] = ak.to_numpy(layercluster_seed_time)
+    payload["layercluster_seed_mult"] = ak.to_numpy(
+        ak.sum(
+            events["LayerCluster_isSeed"] &
+            (events["LayerCluster_energy"] > 0.5) &
+            (events["LayerCluster_dr"] < 0.3) &
+            (events["LayerCluster_Time"] > -90.0),
+            axis=1,
+        )
+    )
+    references["layerClusterSeed"] = layercluster_seed_time
 
-  references = {
-      "seed": seed_time,
-  }
   if scenario in OFFLINE_SCENARIOS:
     references["pv"] = events["PV_Time"]
     references["sigTrk"] = events["sigTrkTime"]
@@ -257,6 +283,8 @@ def build_dataframe(events, scenario, particle, process_name, is_signal):
       "eg_eta": "eg-eta",
       "eg_phi": "eg-phi",
       "seed_time": "eg-seedTime",
+      "layercluster_seed_time": "eg-layerClusterSeedTime",
+      "layercluster_seed_mult": "eg-layerClusterSeedMultiplicity",
   }, inplace=True)
 
   return df
@@ -287,6 +315,7 @@ def main():
   parser.add_argument("--signal", required=True, type=str)
   parser.add_argument("--background", required=True, type=str)
   parser.add_argument("--scenario", action="append", choices=SCENARIOS, help="Optional scenario filter")
+  parser.add_argument("--n-workers", default=1, type=int)
   args = parser.parse_args()
 
   if not args.inputDir and not args.inputFile:
@@ -294,14 +323,45 @@ def main():
       raise RuntimeError("Provide --inputDir, --inputFile, or both --signal-file and --background-file")
 
   scenarios = args.scenario if args.scenario else SCENARIOS
-  scenario_iter = scenarios
-  if tqdm is not None:
-    scenario_iter = tqdm(scenarios, desc="Scenarios", unit="scenario")
-  for scenario in scenario_iter:
-    signal_file = args.signal_file if args.signal_file else args.inputFile
-    background_file = args.background_file if args.background_file else args.inputFile
-    write_scenario_parquet(args.inputDir, signal_file, args.outDir, args.particle, args.region, scenario, args.signal, True)
-    write_scenario_parquet(args.inputDir, background_file, args.outDir, args.particle, args.region, scenario, args.background, False)
+  signal_file = args.signal_file if args.signal_file else args.inputFile
+  background_file = args.background_file if args.background_file else args.inputFile
+
+  tasks = []
+  for scenario in scenarios:
+    tasks.append((scenario, args.signal, True, signal_file))
+    tasks.append((scenario, args.background, False, background_file))
+
+  if args.n_workers <= 1:
+    task_iter = tasks
+    if tqdm is not None:
+      task_iter = tqdm(tasks, desc="Scenario/process tasks", unit="task")
+    for scenario, process_name, is_signal, input_file in task_iter:
+      write_scenario_parquet(args.inputDir, input_file, args.outDir, args.particle, args.region, scenario, process_name, is_signal)
+  else:
+    with ThreadPoolExecutor(max_workers=args.n_workers) as executor:
+      futures = {
+          executor.submit(
+              write_scenario_parquet,
+              args.inputDir,
+              input_file,
+              args.outDir,
+              args.particle,
+              args.region,
+              scenario,
+              process_name,
+              is_signal,
+          ): (scenario, process_name)
+          for scenario, process_name, is_signal, input_file in tasks
+      }
+      future_iter = as_completed(futures)
+      if tqdm is not None:
+        future_iter = tqdm(future_iter, total=len(futures), desc="Scenario/process tasks", unit="task")
+      for future in future_iter:
+        scenario, process_name = futures[future]
+        try:
+          future.result()
+        except Exception as exc:
+          raise RuntimeError("Failed while processing scenario={} process={}".format(scenario, process_name)) from exc
 
 
 if __name__ == "__main__":

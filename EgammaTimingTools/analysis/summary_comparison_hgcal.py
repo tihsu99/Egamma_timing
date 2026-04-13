@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import glob
 import json
 import os
@@ -39,6 +40,13 @@ def load_frame(iso_dir, particle, region, scenario, process_name):
   file_name = os.path.join(iso_dir, particle, region, scenario, f"{process_name}_iso.parquet")
   print("[load] {}".format(file_name))
   return pd.read_parquet(file_name)
+
+
+def load_scenario_frames(iso_dir, particle, region, scenario, signal_process, background_process):
+  print("[summary] scenario={}".format(scenario))
+  sig_df = load_frame(iso_dir, particle, region, scenario, signal_process)
+  bkg_df = load_frame(iso_dir, particle, region, scenario, background_process)
+  return scenario, apply_reweighting(sig_df, bkg_df)
 
 
 def compute_weights(sig_df, bkg_df, pt_bins, eta_bins):
@@ -235,53 +243,51 @@ def resolve_merged_files(merged_dir, merged_file, particle, region, process_name
 
 def timing_arrays(events, scenario):
   arrays = {}
+  seed_mask = None
+  seed_time = None
   if "Trackster_Time" in events.fields:
-    seed_time = ak.fill_none(
-        ak.mean(
-            events["Trackster_Time"][
-                events["Trackster_isSeed"] &
-                (events["Trackster_pt"] > 1.0) &
-                (events["Trackster_dr"] < 0.3) &
-                (events["Trackster_Time"] > -90.0)
-            ],
-            axis=1,
-        ),
-        -99.0,
+    seed_mask = (
+        events["Trackster_isSeed"] &
+        (events["Trackster_pt"] > 1.0) &
+        (events["Trackster_dr"] < 0.3) &
+        (events["Trackster_Time"] > -90.0)
     )
+    seed_time = ak.fill_none(ak.mean(events["Trackster_Time"][seed_mask], axis=1), -99.0)
+    arrays["SeedTime"] = ak.to_numpy(seed_time[seed_time > -90.0])
+    arrays["SeedMultiplicity"] = ak.to_numpy(ak.sum(seed_mask, axis=1))
+    arrays["Trackster_Time"] = ak.to_numpy(ak.flatten(events["Trackster_Time"][events["Trackster_Time"] > -90.0]))
     arrays["Trackster_TimeWrtSeed"] = ak.flatten(
         abs(events["Trackster_Time"] - ak.broadcast_arrays(seed_time, events["Trackster_Time"])[0])
     )
   if "HGCRecHit_Time" in events.fields and "Trackster_Time" in events.fields:
-    seed_time = ak.fill_none(
-        ak.mean(
-            events["Trackster_Time"][
-                events["Trackster_isSeed"] &
-                (events["Trackster_pt"] > 1.0) &
-                (events["Trackster_dr"] < 0.3) &
-                (events["Trackster_Time"] > -90.0)
-            ],
-            axis=1,
-        ),
-        -99.0,
-    )
+    arrays["HGCRecHit_Time"] = ak.to_numpy(ak.flatten(events["HGCRecHit_Time"][events["HGCRecHit_Time"] > -90.0]))
     arrays["HGCRecHit_TimeWrtSeed"] = ak.flatten(
         abs(events["HGCRecHit_Time"] - ak.broadcast_arrays(seed_time, events["HGCRecHit_Time"])[0])
     )
   if scenario in ONLINE_SCENARIOS and "LayerCluster_Time" in events.fields and "Trackster_Time" in events.fields:
-    seed_time = ak.fill_none(
-        ak.mean(
-            events["Trackster_Time"][
-                events["Trackster_isSeed"] &
-                (events["Trackster_pt"] > 1.0) &
-                (events["Trackster_dr"] < 0.3) &
-                (events["Trackster_Time"] > -90.0)
-            ],
-            axis=1,
-        ),
-        -99.0,
+    layercluster_seed_mask = (
+        events["LayerCluster_isSeed"] &
+        (events["LayerCluster_energy"] > 0.5) &
+        (events["LayerCluster_dr"] < 0.3) &
+        (events["LayerCluster_Time"] > -90.0)
     )
+    weighted_sum = ak.sum(events["LayerCluster_Time"][layercluster_seed_mask] * events["LayerCluster_energy"][layercluster_seed_mask], axis=1)
+    energy_sum = ak.sum(events["LayerCluster_energy"][layercluster_seed_mask], axis=1)
+    layercluster_seed_time = ak.fill_none(ak.where(energy_sum > 0, weighted_sum / energy_sum, -99.0), -99.0)
+    arrays["LayerClusterSeedTime"] = ak.to_numpy(layercluster_seed_time[layercluster_seed_time > -90.0])
+    arrays["LayerClusterSeedMultiplicity"] = ak.to_numpy(ak.sum(layercluster_seed_mask, axis=1))
+    arrays["LayerCluster_Time"] = ak.to_numpy(ak.flatten(events["LayerCluster_Time"][events["LayerCluster_Time"] > -90.0]))
     arrays["LayerCluster_TimeWrtSeed"] = ak.flatten(
         abs(events["LayerCluster_Time"] - ak.broadcast_arrays(seed_time, events["LayerCluster_Time"])[0])
+    )
+    arrays["Trackster_TimeWrtLayerClusterSeed"] = ak.flatten(
+        abs(events["Trackster_Time"] - ak.broadcast_arrays(layercluster_seed_time, events["Trackster_Time"])[0])
+    )
+    arrays["LayerCluster_TimeWrtLayerClusterSeed"] = ak.flatten(
+        abs(events["LayerCluster_Time"] - ak.broadcast_arrays(layercluster_seed_time, events["LayerCluster_Time"])[0])
+    )
+    arrays["HGCRecHit_TimeWrtLayerClusterSeed"] = ak.flatten(
+        abs(events["HGCRecHit_Time"] - ak.broadcast_arrays(layercluster_seed_time, events["HGCRecHit_Time"])[0])
     )
   if scenario in OFFLINE_SCENARIOS:
     arrays["Track_TimeWrtPV"] = ak.flatten(abs(events["Track_Time"] - ak.broadcast_arrays(events["PV_Time"], events["Track_Time"])[0]))
@@ -293,9 +299,40 @@ def timing_arrays(events, scenario):
   return {name: ak.to_numpy(values[(values > -90) & (values < 900)]) for name, values in arrays.items()}
 
 
-def plot_timing_distributions(merged_dir, signal_merged_file, background_merged_file, particle, region, signal_process, background_process, plotdir):
-  common_variables = ["Trackster_TimeWrtSeed", "HGCRecHit_TimeWrtSeed"]
-  online_only = ["LayerCluster_TimeWrtSeed"]
+def load_timing_payload_for_scenario(merged_dir, signal_merged_file, background_merged_file, particle, region, signal_process, background_process, scenario):
+  scenario_payload = {}
+  matched_branch = "matchedToGenEle" if particle == "electron" else "matchedToGenPho"
+  print("[timing] scenario={}".format(scenario))
+  for process_name, is_signal in [(signal_process, True), (background_process, False)]:
+    merged_file = signal_merged_file if is_signal else background_merged_file
+    files = resolve_merged_files(merged_dir, merged_file, particle, region, process_name)
+    events = read_merged_tree(files, scenario)
+    if is_signal:
+      events = events[events[matched_branch] == 1]
+    else:
+      events = events[events[matched_branch] != 1]
+    scenario_payload[process_name] = timing_arrays(events, scenario)
+  return scenario, scenario_payload
+
+
+def plot_timing_distributions(merged_dir, signal_merged_file, background_merged_file, particle, region, signal_process, background_process, plotdir, n_workers=1):
+  common_variables = [
+      "SeedTime",
+      "SeedMultiplicity",
+      "Trackster_Time",
+      "Trackster_TimeWrtSeed",
+      "HGCRecHit_Time",
+      "HGCRecHit_TimeWrtSeed",
+  ]
+  online_only = [
+      "LayerClusterSeedTime",
+      "LayerClusterSeedMultiplicity",
+      "LayerCluster_Time",
+      "LayerCluster_TimeWrtSeed",
+      "Trackster_TimeWrtLayerClusterSeed",
+      "LayerCluster_TimeWrtLayerClusterSeed",
+      "HGCRecHit_TimeWrtLayerClusterSeed",
+  ]
   offline_only = [
       "Track_TimeWrtPV",
       "Track_TimeWrtSigTrk",
@@ -306,20 +343,35 @@ def plot_timing_distributions(merged_dir, signal_merged_file, background_merged_
   ]
 
   scenario_payload = {}
-  prefix = "Ele" if particle == "electron" else "Pho"
-  matched_branch = "matchedToGenEle" if particle == "electron" else "matchedToGenPho"
-
-  for scenario in SCENARIOS:
-    scenario_payload[scenario] = {}
-    for process_name, is_signal in [(signal_process, True), (background_process, False)]:
-      merged_file = signal_merged_file if is_signal else background_merged_file
-      files = resolve_merged_files(merged_dir, merged_file, particle, region, process_name)
-      events = read_merged_tree(files, scenario)
-      if is_signal:
-        events = events[events[matched_branch] == 1]
-      else:
-        events = events[events[matched_branch] != 1]
-      scenario_payload[scenario][process_name] = timing_arrays(events, scenario)
+  if n_workers <= 1:
+    for scenario in SCENARIOS:
+      key, payload = load_timing_payload_for_scenario(
+          merged_dir, signal_merged_file, background_merged_file,
+          particle, region, signal_process, background_process, scenario,
+      )
+      scenario_payload[key] = payload
+  else:
+    with ThreadPoolExecutor(max_workers=n_workers) as executor:
+      futures = {
+          executor.submit(
+              load_timing_payload_for_scenario,
+              merged_dir,
+              signal_merged_file,
+              background_merged_file,
+              particle,
+              region,
+              signal_process,
+              background_process,
+              scenario,
+          ): scenario
+          for scenario in SCENARIOS
+      }
+      future_iter = as_completed(futures)
+      if tqdm is not None:
+        future_iter = tqdm(future_iter, total=len(futures), desc="Loading timing trees", unit="scenario")
+      for future in future_iter:
+        key, payload = future.result()
+        scenario_payload[key] = payload
 
   variable_iter = common_variables + online_only + offline_only
   if tqdm is not None:
@@ -339,7 +391,13 @@ def plot_timing_distributions(merged_dir, signal_merged_file, background_merged_
         values = scenario_payload[scenario][process_name].get(variable)
         if values is None or len(values) == 0:
           continue
-        plt.hist(values, bins=np.linspace(0.0, 0.25, 60), density=True, histtype="step", linewidth=2, label=scenario)
+        if variable == "SeedMultiplicity":
+          bins = np.arange(-0.5, 10.5, 1.0)
+        elif "Wrt" in variable or variable.endswith("_Time") or variable == "SeedTime":
+          bins = np.linspace(0.0, 0.25, 60) if variable != "SeedTime" else np.linspace(-0.1, 0.25, 70)
+        else:
+          bins = np.linspace(0.0, 0.25, 60)
+        plt.hist(values, bins=bins, density=True, histtype="step", linewidth=2, label=scenario)
         drew = True
       if not drew:
         plt.close()
@@ -347,7 +405,8 @@ def plot_timing_distributions(merged_dir, signal_merged_file, background_merged_
       plt.xlabel(variable)
       plt.ylabel("Density")
       plt.title(f"{variable} ({label})")
-      plt.yscale("log")
+      if variable != "SeedMultiplicity":
+        plt.yscale("log")
       plt.grid(alpha=0.3)
       plt.legend()
       plt.tight_layout()
@@ -370,6 +429,7 @@ def main():
   parser.add_argument("--region", required=True, type=str)
   parser.add_argument("--signal", required=True, type=str)
   parser.add_argument("--background", required=True, type=str)
+  parser.add_argument("--n-workers", default=1, type=int)
   args = parser.parse_args()
 
   if not args.mergedDir and not args.mergedFile:
@@ -379,14 +439,25 @@ def main():
   check_dir(args.plotDir)
 
   frames = {}
-  scenario_iter = SCENARIOS
-  if tqdm is not None:
-    scenario_iter = tqdm(SCENARIOS, desc="Loading scenarios", unit="scenario")
-  for scenario in scenario_iter:
-    print("[summary] scenario={}".format(scenario))
-    sig_df = load_frame(args.isoDir, args.particle, args.region, scenario, args.signal)
-    bkg_df = load_frame(args.isoDir, args.particle, args.region, scenario, args.background)
-    frames[scenario] = apply_reweighting(sig_df, bkg_df)
+  if args.n_workers <= 1:
+    scenario_iter = SCENARIOS
+    if tqdm is not None:
+      scenario_iter = tqdm(SCENARIOS, desc="Loading scenarios", unit="scenario")
+    for scenario in scenario_iter:
+      key, frame = load_scenario_frames(args.isoDir, args.particle, args.region, scenario, args.signal, args.background)
+      frames[key] = frame
+  else:
+    with ThreadPoolExecutor(max_workers=args.n_workers) as executor:
+      futures = {
+          executor.submit(load_scenario_frames, args.isoDir, args.particle, args.region, scenario, args.signal, args.background): scenario
+          for scenario in SCENARIOS
+      }
+      future_iter = as_completed(futures)
+      if tqdm is not None:
+        future_iter = tqdm(future_iter, total=len(futures), desc="Loading scenarios", unit="scenario")
+      for future in future_iter:
+        key, frame = future.result()
+        frames[key] = frame
 
   summary = {}
   roc_tasks = [(collection_name, veto_mode) for collection_name in ["trackster", "HGCRecHit"] for veto_mode in ["cone", "seed", "cluster"]]
@@ -413,6 +484,28 @@ def main():
     )
     plot_auc_scan({scenario: frames[scenario] for scenario in SCENARIOS if scenario in ONLINE_SCENARIOS}, "layerCluster", veto_mode, "seed", args.plotDir)
     print("[roc] layerCluster {} ref=seed".format(veto_mode))
+
+  online_frames = {scenario: frames[scenario] for scenario in SCENARIOS if scenario in ONLINE_SCENARIOS}
+  online_layer_seed_tasks = [
+      (collection_name, veto_mode)
+      for collection_name in ["trackster", "HGCRecHit", "layerCluster"]
+      for veto_mode in ["cone", "seed", "cluster"]
+  ]
+  online_layer_seed_iter = online_layer_seed_tasks
+  if tqdm is not None:
+    online_layer_seed_iter = tqdm(online_layer_seed_tasks, desc="Online layerClusterSeed ROC", unit="scan")
+  for collection_name, veto_mode in online_layer_seed_iter:
+    key = f"{collection_name}_{veto_mode}_layerClusterSeed"
+    summary[key] = plot_roc_by_scenario(
+        online_frames,
+        collection_name,
+        veto_mode,
+        "layerClusterSeed",
+        args.plotDir,
+        include_default_online=(collection_name != "layerCluster"),
+    )
+    plot_auc_scan(online_frames, collection_name, veto_mode, "layerClusterSeed", args.plotDir)
+    print("[roc] {} {} ref=layerClusterSeed".format(collection_name, veto_mode))
 
   offline_frames = {scenario: frames[scenario] for scenario in SCENARIOS if scenario in OFFLINE_SCENARIOS}
   offline_tasks = [
@@ -445,6 +538,7 @@ def main():
       args.signal,
       args.background,
       args.plotDir,
+      args.n_workers,
   )
 
 
