@@ -44,6 +44,9 @@ workflow:
   step1_customise: >-
     SLHCUpgradeSimulations/Configuration/aging.customise_aging_1000,
     Configuration/DataProcessing/Utils.addMonitoring,
+    L1Trigger/Configuration/customisePhase2FEVTDEBUGHLT.customisePhase2FEVTDEBUGHLT,
+    L1Trigger/Configuration/customisePhase2TTOn110.customisePhase2TTOn110
+
   hlt_customise_commands: >-
     process.load('RecoEgamma.EgammaHLTProducers.hltEgammaHLTExtra_cfi');
     process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltEgammaHLTExtra_*_*');
