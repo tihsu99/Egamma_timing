@@ -211,7 +211,6 @@ def build_production_commands(config, args, particle, region, sample, variant, i
       "comparison_input": comparison_input,
       "output_file": output_file,
       "workdir": "$WORKDIR",
-      "l1_output": workflow_cfg.get("l1_output", "step_l1.root"),
       "hlt_output": workflow_cfg.get("hlt_output", "step_hlt.root"),
       "reco_output": workflow_cfg.get("reco_output", "step_reco.root"),
       "reco_output_commands": workflow_cfg.get("reco_output_commands", ""),

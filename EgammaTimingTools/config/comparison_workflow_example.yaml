@@ -59,7 +59,6 @@ workflow:
     process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltTiclEGammaSuperClusterProducerUnseeded_*_*');
     process.egammaExtra_step = cms.EndPath(process.hltEgammaHLTExtra);
     process.schedule.append(process.egammaExtra_step)
-  l1_output: step_l1.root
   hlt_output: step_hlt.root
   reco_output: step_reco.root
   reco_output_commands: >-
@@ -92,34 +91,17 @@ workflow:
     process.MINIAODSIMoutput.outputCommands.append('keep HGCRecHitsSorted_*_*_*');
   commands:
     - >
-      cmsDriver.py Phase2 -s L1,L1TrackTrigger
-      --conditions auto:phase2_realistic_T33
-      --geometry ExtendedRun4D110
-      --era Phase2C17I13M9
-      --eventcontent FEVTDEBUGHLT
-      --datatier GEN-SIM-DIGI-RAW-MINIAOD
-      --customise "{step1_customise}"
-      --filein {input_file}
-      --fileout file:{workdir}/{l1_output}
-      --inputCommands "keep *, drop l1tPFJets_*_*_*, drop l1tTrackerMuons_l1tTkMuonsGmt*_*_HLT"
-      --outputCommands "drop l1tTrackerMuons_l1tTkMuonsGmt*_*_HLT"
-      --mc
-      {max_events_arg}
-      --no_exec
-      --python_filename l1_step.py
-    - cmsRun l1_step.py
-    - >
       cmsDriver.py Phase2 -s L1P2GT,HLT:75e33 --processName=HLTX
       --conditions auto:phase2_realistic_T33
       --geometry ExtendedRun4D110
       --era Phase2C17I13M9
       --eventcontent FEVTDEBUGHLT
-      --customise SLHCUpgradeSimulations/Configuration/aging.customise_aging_1000
+      --customise "{step1_customise}"
       --customise_commands "{hlt_customise_commands}"
       {proc_modifier}
-      --filein file:{workdir}/{l1_output}
+      --filein {input_file}
       --fileout file:{workdir}/{hlt_output}
-      --inputCommands "keep *, drop *_hlt*_*_HLT, drop triggerTriggerFilterObjectWithRefs_l1t*_*_HLT"
+      --inputCommands "keep *, drop *_hlt*_*_HLT, drop triggerTriggerFilterObjectWithRefs_l1t*_*_HLT, drop l1tTrackerMuons_l1tTkMuonsGmt*_*_HLT, drop l1tPFJets_*_*_*"
       --mc
       {max_events_arg}
       --no_exec
