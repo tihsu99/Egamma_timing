@@ -23,6 +23,6 @@
 <use name="DataFormats/HepMCCandidate"/>
 <export>
 </export>
-<library file="*.cc" name="RecoEgammaEgammaIsolationAlgosPlugins">
+<library file="*.cc" name="EgammaTimingToolsPlugins">
   <flags EDM_PLUGIN="1"/>
 </library>

@@ -226,6 +226,8 @@ private:
 
   // Settings
   const double ptMin_;
+  const double offlinePtMin_;
+  const double onlinePtMin_;
   const double intRadiusBarrel_;
   const double intRadiusEndcap_;
   const double stripBarrel_;
@@ -266,6 +268,8 @@ ElectronComparisonNtuplizer::ElectronComparisonNtuplizer(const edm::ParameterSet
       mtdTrkQualMVAToken_{consumes(config.getParameter<edm::InputTag>("mtdTrkQualMVA"))},
       caloGeometryToken_(esConsumes()),
       ptMin_{config.getParameter<double>("ptMin")},
+      offlinePtMin_{config.getParameter<double>("offlinePtMin")},
+      onlinePtMin_{config.getParameter<double>("onlinePtMin")},
       intRadiusBarrel_{config.getParameter<double>("intRadiusBarrel")},
       intRadiusEndcap_{config.getParameter<double>("intRadiusEndcap")},
       stripBarrel_{config.getParameter<double>("stripBarrel")},
@@ -648,13 +652,34 @@ void ElectronComparisonNtuplizer::analyze(const edm::Event& iEvent, const edm::E
   for (unsigned int index = 0; index < selectedGenIndices.size(); ++index) {
     const int genIndex = selectedGenIndices[index];
     const auto& particle = (*genParticles)[genIndex];
-    const auto offlineMatch = egammaTiming::findBestRecoMatch(particle.eta(), particle.phi(), offlineElectrons, gen_deltaR_);
-    const auto onlineMatch = egammaTiming::findBestRecoMatch(particle.eta(), particle.phi(), onlineCandidates, gen_deltaR_);
+    std::pair<int, double> offlineMatch{-1, 999.};
+    for (unsigned int i = 0; i < offlineElectrons.size(); ++i) {
+      if (offlineElectrons[i].pt() < offlinePtMin_) {
+        continue;
+      }
+      const double dr = reco::deltaR(particle.eta(), particle.phi(), offlineElectrons[i].eta(), offlineElectrons[i].phi());
+      if (dr < offlineMatch.second && dr < gen_deltaR_) {
+        offlineMatch = {static_cast<int>(i), dr};
+      }
+    }
+    std::pair<int, double> onlineMatch{-1, 999.};
+    for (unsigned int i = 0; i < onlineCandidates.size(); ++i) {
+      if (onlineCandidates[i].et() < onlinePtMin_) {
+        continue;
+      }
+      const double dr = reco::deltaR(particle.eta(), particle.phi(), onlineCandidates[i].eta(), onlineCandidates[i].phi());
+      if (dr < onlineMatch.second && dr < gen_deltaR_) {
+        onlineMatch = {static_cast<int>(i), dr};
+      }
+    }
     fillGenBranches(iEvent, genIndex, selectedTruthClasses[index], particle, offlineMatch, onlineMatch, offlineElectrons, onlineCandidates, onlineObjects);
   }
 
   for (unsigned int i = 0; i < offlineElectrons.size(); ++i) {
     const reco::GsfElectron* electron = &(offlineElectrons.at(i));
+    if (electron->pt() < offlinePtMin_) {
+      continue;
+    }
     const auto genMatch = isMC_ ? egammaTiming::findBestGenMatch(electron->eta(),
                                                                  electron->phi(),
                                                                  *genParticles,
@@ -877,6 +902,9 @@ void ElectronComparisonNtuplizer::analyze(const edm::Event& iEvent, const edm::E
   }
 
   for (unsigned int i = 0; i < onlineCandidates.size(); ++i) {
+    if (onlineCandidates[i].et() < onlinePtMin_) {
+      continue;
+    }
     const auto genMatch = isMC_ ? egammaTiming::findBestGenMatch(onlineCandidates[i].eta(),
                                                                  onlineCandidates[i].phi(),
                                                                  *genParticles,
@@ -1047,6 +1075,8 @@ void ElectronComparisonNtuplizer::fillDescriptions(edm::ConfigurationDescription
   desc.add<edm::InputTag>("mtdSigmat0", edm::InputTag("tofPID:sigmat0"));
   desc.add<edm::InputTag>("mtdTrkQualMVA", edm::InputTag("mtdTrackQualityMVA:mtdQualMVA"));
   desc.add<double>("ptMin", 1.0);
+  desc.add<double>("offlinePtMin", 15.0);
+  desc.add<double>("onlinePtMin", 15.0);
   desc.add<double>("intRadiusBarrel", 0.01);
   desc.add<double>("intRadiusEndcap", 0.01);
   desc.add<double>("stripBarrel", 0.01);

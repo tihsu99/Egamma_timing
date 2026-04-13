@@ -134,8 +134,8 @@ workflow:
       --eventcontent MINIAODSIM
       --geometry ExtendedRun4D110
       --era Phase2C17I13M9
-      --processName=reRECO
       --customise SLHCUpgradeSimulations/Configuration/aging.customise_aging_1000
+      {proc_modifier}
       --customise_commands "{reco_output_commands}"
       --filein file:{workdir}/{hlt_output}
       --fileout file:{workdir}/{reco_output}
