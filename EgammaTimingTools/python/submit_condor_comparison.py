@@ -314,20 +314,33 @@ def discover_comparison_files(root_dir):
   return mapping
 
 
+def get_matched_merge_inputs(v4_dir, v5_dir):
+  v4_files = discover_comparison_files(v4_dir)
+  v5_files = discover_comparison_files(v5_dir)
+  common_keys = sorted(set(v4_files.keys()) & set(v5_files.keys()))
+  v4_only = sorted(set(v4_files.keys()) - set(v5_files.keys()))
+  v5_only = sorted(set(v5_files.keys()) - set(v4_files.keys()))
+  return v4_files, v5_files, common_keys, v4_only, v5_only
+
+
 def submit_merge_jobs(config, condor, farm_dir, args):
-  v4_files = discover_comparison_files(args.v4_dir)
-  v5_files = discover_comparison_files(args.v5_dir)
-  if set(v4_files.keys()) != set(v5_files.keys()):
-    raise RuntimeError("Mismatch between v4 and v5 comparison ntuples")
+  v4_files, v5_files, common_keys, v4_only, v5_only = get_matched_merge_inputs(args.v4_dir, args.v5_dir)
+  if not common_keys:
+    raise RuntimeError("No matched v4/v5 comparison ntuples found")
+  if v4_only:
+    print("Skipping {} v4-only ntuple(s) without v5 match".format(len(v4_only)))
+  if v5_only:
+    print("Skipping {} v5-only ntuple(s) without v4 match".format(len(v5_only)))
 
   timing_dir = config["timing-dir"]
   created_shells = []
   created_jobs = 0
-  for (particle, region, sample, file_name), v4_file in sorted(v4_files.items()):
+  for (particle, region, sample, file_name) in common_keys:
     if not accept_sample(args, particle, region, sample):
       continue
     if args.max_files is not None and created_jobs >= args.max_files:
       return created_shells
+    v4_file = v4_files[(particle, region, sample, file_name)]
     v5_file = v5_files[(particle, region, sample, file_name)]
     output_dir = os.path.join(args.outdir, particle, region, sample)
     check_dir(output_dir)
@@ -350,6 +363,42 @@ def submit_merge_jobs(config, condor, farm_dir, args):
     created_shells.append(shell_path)
     created_jobs += 1
   return created_shells
+
+
+def run_merge_jobs_local(config, args):
+  v4_files, v5_files, common_keys, v4_only, v5_only = get_matched_merge_inputs(args.v4_dir, args.v5_dir)
+  if not common_keys:
+    raise RuntimeError("No matched v4/v5 comparison ntuples found")
+  if v4_only:
+    print("Skipping {} v4-only ntuple(s) without v5 match".format(len(v4_only)))
+  if v5_only:
+    print("Skipping {} v5-only ntuple(s) without v4 match".format(len(v5_only)))
+
+  timing_dir = config["timing-dir"]
+  merged_outputs = []
+  merged_jobs = 0
+  for (particle, region, sample, file_name) in common_keys:
+    if not accept_sample(args, particle, region, sample):
+      continue
+    if args.max_files is not None and merged_jobs >= args.max_files:
+      return merged_outputs
+    v4_file = v4_files[(particle, region, sample, file_name)]
+    v5_file = v5_files[(particle, region, sample, file_name)]
+    output_dir = os.path.join(args.outdir, particle, region, sample)
+    check_dir(output_dir)
+    output_file = os.path.join(output_dir, file_name)
+    if args.check and os.path.exists(output_file):
+      continue
+    command = "python3 {}/analysis/merge_comparison_trees.py --v4 {} --v5 {} --out {}".format(
+        timing_dir, v4_file, v5_file, output_file
+    )
+    if args.test:
+      print(command)
+    else:
+      run_command(command)
+    merged_outputs.append(output_file)
+    merged_jobs += 1
+  return merged_outputs
 
 
 if __name__ == "__main__":
@@ -408,25 +457,31 @@ if __name__ == "__main__":
   if args.v5_dir is not None:
     args.v5_dir = os.path.abspath(args.v5_dir)
 
-  check_dir(args.farm)
-  check_dir(args.logdir)
-  condor_path = os.path.join(args.farm, "condor.sub")
-  created_shells = []
-  with open(condor_path, "w") as condor:
-    write_condor_header(condor, args.farm, args.logdir, args.universe, args.jobFlavour, args.proxy)
-    if args.mode == "produce":
-      created_shells = submit_production_jobs(config, condor, args.farm, args)
+  if args.mode == "merge":
+    if args.v4_dir is None or args.v5_dir is None:
+      raise RuntimeError("--v4_dir and --v5_dir are required in merge mode")
+    merged_outputs = run_merge_jobs_local(config, args)
+    if merged_outputs:
+      print("Merged {} file(s):".format(len(merged_outputs)))
+      for output_path in merged_outputs:
+        print(output_path)
     else:
-      if args.v4_dir is None or args.v5_dir is None:
-        raise RuntimeError("--v4_dir and --v5_dir are required in merge mode")
-      created_shells = submit_merge_jobs(config, condor, args.farm, args)
-
-  if len(created_shells):
-    print("Generated {} shell script(s):".format(len(created_shells)))
-    for shell_path in created_shells:
-      print(shell_path)
+      print("No merge outputs were produced.")
   else:
-    print("No shell scripts were generated.")
+    check_dir(args.farm)
+    check_dir(args.logdir)
+    condor_path = os.path.join(args.farm, "condor.sub")
+    created_shells = []
+    with open(condor_path, "w") as condor:
+      write_condor_header(condor, args.farm, args.logdir, args.universe, args.jobFlavour, args.proxy)
+      created_shells = submit_production_jobs(config, condor, args.farm, args)
 
-  if not args.test:
-    os.system("condor_submit {}".format(condor_path))
+    if len(created_shells):
+      print("Generated {} shell script(s):".format(len(created_shells)))
+      for shell_path in created_shells:
+        print(shell_path)
+    else:
+      print("No shell scripts were generated.")
+
+    if not args.test:
+      os.system("condor_submit {}".format(condor_path))
