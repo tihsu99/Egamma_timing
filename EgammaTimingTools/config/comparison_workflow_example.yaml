@@ -128,6 +128,7 @@ workflow:
     - cmsRun hlt_step.py
     - >
       cmsDriver.py step2_RECO_MINI -s RAW2DIGI,L1Reco,RECO,RECOSIM,PAT
+      --processName=reRECO
       --conditions auto:phase2_realistic_T33
       --datatier MINIAODSIM
       --eventcontent MINIAODSIM
