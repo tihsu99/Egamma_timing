@@ -39,9 +39,16 @@ def scenario_files(input_dir, particle, region, process_name):
   return sorted(glob.glob(pattern))
 
 
+def resolve_input_files(input_dir, input_file, particle, region, process_name):
+  if input_file:
+    return [input_file]
+  return scenario_files(input_dir, particle, region, process_name)
+
+
 def read_tree(files, tree_name):
   if not files:
     raise RuntimeError("No ROOT files found for tree {}".format(tree_name))
+  print("[read] tree={} files={}".format(tree_name, len(files)))
   return uproot.concatenate([f"{name}:{tree_name}" for name in files], library="ak")
 
 
@@ -239,21 +246,23 @@ def build_dataframe(events, scenario, particle, process_name, is_signal):
   return df
 
 
-def write_scenario_parquet(input_dir, out_dir, particle, region, scenario, process_name, is_signal):
-  files = scenario_files(input_dir, particle, region, process_name)
+def write_scenario_parquet(input_dir, input_file, out_dir, particle, region, scenario, process_name, is_signal):
+  files = resolve_input_files(input_dir, input_file, particle, region, process_name)
+  print("[build] scenario={} process={} signal={}".format(scenario, process_name, is_signal))
   events = read_tree(files, scenario)
   df = build_dataframe(events, scenario, particle, process_name, is_signal)
   scenario_dir = os.path.join(out_dir, particle, region, scenario)
   check_dir(scenario_dir)
   out_path = os.path.join(scenario_dir, f"{process_name}_iso.parquet")
   df.to_parquet(out_path, index=False)
-  print("Saved", out_path, len(df))
+  print("[saved] {} entries={}".format(out_path, len(df)))
   return out_path
 
 
 def main():
   parser = argparse.ArgumentParser(description="Build HGCal timing/isolation parquet tables from merged comparison ntuples")
-  parser.add_argument("--inputDir", required=True, type=str, help="Merged ROOT base directory")
+  parser.add_argument("--inputDir", type=str, help="Merged ROOT base directory")
+  parser.add_argument("--inputFile", type=str, help="Single merged ROOT file")
   parser.add_argument("--outDir", required=True, type=str, help="Output parquet directory")
   parser.add_argument("--particle", required=True, choices=["electron", "photon"])
   parser.add_argument("--region", required=True, type=str)
@@ -262,10 +271,13 @@ def main():
   parser.add_argument("--scenario", action="append", choices=SCENARIOS, help="Optional scenario filter")
   args = parser.parse_args()
 
+  if not args.inputDir and not args.inputFile:
+    raise RuntimeError("Provide either --inputDir or --inputFile")
+
   scenarios = args.scenario if args.scenario else SCENARIOS
   for scenario in scenarios:
-    write_scenario_parquet(args.inputDir, args.outDir, args.particle, args.region, scenario, args.signal, True)
-    write_scenario_parquet(args.inputDir, args.outDir, args.particle, args.region, scenario, args.background, False)
+    write_scenario_parquet(args.inputDir, args.inputFile, args.outDir, args.particle, args.region, scenario, args.signal, True)
+    write_scenario_parquet(args.inputDir, args.inputFile, args.outDir, args.particle, args.region, scenario, args.background, False)
 
 
 if __name__ == "__main__":

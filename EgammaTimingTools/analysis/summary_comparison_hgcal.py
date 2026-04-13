@@ -32,6 +32,7 @@ def check_dir(path):
 
 def load_frame(iso_dir, particle, region, scenario, process_name):
   file_name = os.path.join(iso_dir, particle, region, scenario, f"{process_name}_iso.parquet")
+  print("[load] {}".format(file_name))
   return pd.read_parquet(file_name)
 
 
@@ -202,11 +203,18 @@ def plot_auc_scan(frames, collection_name, veto_mode, reference_name, plotdir):
 def read_merged_tree(files, tree_name):
   if not files:
     raise RuntimeError("No merged ROOT files found for tree {}".format(tree_name))
+  print("[read] tree={} files={}".format(tree_name, len(files)))
   return uproot.concatenate([f"{name}:{tree_name}" for name in files], library="ak")
 
 
 def merged_files(merged_dir, particle, region, process_name):
   return sorted(glob.glob(os.path.join(merged_dir, particle, region, process_name, "*.root")))
+
+
+def resolve_merged_files(merged_dir, merged_file, particle, region, process_name):
+  if merged_file:
+    return [merged_file]
+  return merged_files(merged_dir, particle, region, process_name)
 
 
 def timing_arrays(events, scenario):
@@ -269,7 +277,7 @@ def timing_arrays(events, scenario):
   return {name: ak.to_numpy(values[(values > -90) & (values < 900)]) for name, values in arrays.items()}
 
 
-def plot_timing_distributions(merged_dir, particle, region, signal_process, background_process, plotdir):
+def plot_timing_distributions(merged_dir, merged_file, particle, region, signal_process, background_process, plotdir):
   common_variables = ["Trackster_TimeWrtSeed", "HGCRecHit_TimeWrtSeed"]
   online_only = ["LayerCluster_TimeWrtSeed"]
   offline_only = [
@@ -288,7 +296,7 @@ def plot_timing_distributions(merged_dir, particle, region, signal_process, back
   for scenario in SCENARIOS:
     scenario_payload[scenario] = {}
     for process_name, is_signal in [(signal_process, True), (background_process, False)]:
-      files = merged_files(merged_dir, particle, region, process_name)
+      files = resolve_merged_files(merged_dir, merged_file, particle, region, process_name)
       events = read_merged_tree(files, scenario)
       if is_signal:
         events = events[events[matched_branch] == 1]
@@ -327,12 +335,14 @@ def plot_timing_distributions(merged_dir, particle, region, signal_process, back
       plt.savefig(os.path.join(plotdir, out_name))
       plt.savefig(os.path.join(plotdir, out_name.replace(".png", ".pdf")))
       plt.close()
+      print("[plot] {}".format(out_name))
 
 
 def main():
   parser = argparse.ArgumentParser(description="Summarize HGCal timing/isolation performance for online/offline v4/v5 comparison")
   parser.add_argument("--isoDir", required=True, type=str)
-  parser.add_argument("--mergedDir", required=True, type=str)
+  parser.add_argument("--mergedDir", type=str)
+  parser.add_argument("--mergedFile", type=str)
   parser.add_argument("--plotDir", required=True, type=str)
   parser.add_argument("--particle", required=True, choices=["electron", "photon"])
   parser.add_argument("--region", required=True, type=str)
@@ -340,10 +350,14 @@ def main():
   parser.add_argument("--background", required=True, type=str)
   args = parser.parse_args()
 
+  if not args.mergedDir and not args.mergedFile:
+    raise RuntimeError("Provide either --mergedDir or --mergedFile")
+
   check_dir(args.plotDir)
 
   frames = {}
   for scenario in SCENARIOS:
+    print("[summary] scenario={}".format(scenario))
     sig_df = load_frame(args.isoDir, args.particle, args.region, scenario, args.signal)
     bkg_df = load_frame(args.isoDir, args.particle, args.region, scenario, args.background)
     frames[scenario] = apply_reweighting(sig_df, bkg_df)
@@ -354,6 +368,7 @@ def main():
       key = f"{collection_name}_{veto_mode}_seed"
       summary[key] = plot_roc_by_scenario(frames, collection_name, veto_mode, "seed", args.plotDir, include_default_online=True)
       plot_auc_scan(frames, collection_name, veto_mode, "seed", args.plotDir)
+      print("[roc] {} {} ref=seed".format(collection_name, veto_mode))
 
   for veto_mode in ["cone", "seed", "cluster"]:
     key = f"layerCluster_{veto_mode}_seed"
@@ -365,6 +380,7 @@ def main():
         args.plotDir,
     )
     plot_auc_scan({scenario: frames[scenario] for scenario in SCENARIOS if scenario in ONLINE_SCENARIOS}, "layerCluster", veto_mode, "seed", args.plotDir)
+    print("[roc] layerCluster {} ref=seed".format(veto_mode))
 
   offline_frames = {scenario: frames[scenario] for scenario in SCENARIOS if scenario in OFFLINE_SCENARIOS}
   for reference_name in OFFLINE_ONLY_REFERENCES:
@@ -373,11 +389,13 @@ def main():
         key = f"{collection_name}_{veto_mode}_{reference_name}"
         summary[key] = plot_roc_by_scenario(offline_frames, collection_name, veto_mode, reference_name, args.plotDir)
         plot_auc_scan(offline_frames, collection_name, veto_mode, reference_name, args.plotDir)
+        print("[roc] {} {} ref={}".format(collection_name, veto_mode, reference_name))
 
   with open(os.path.join(args.plotDir, "roc_summary.json"), "w") as handle:
     json.dump(summary, handle, indent=2, sort_keys=True)
+  print("[saved] {}".format(os.path.join(args.plotDir, "roc_summary.json")))
 
-  plot_timing_distributions(args.mergedDir, args.particle, args.region, args.signal, args.background, args.plotDir)
+  plot_timing_distributions(args.mergedDir, args.mergedFile, args.particle, args.region, args.signal, args.background, args.plotDir)
 
 
 if __name__ == "__main__":
