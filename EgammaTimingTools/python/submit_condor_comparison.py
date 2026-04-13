@@ -47,10 +47,10 @@ def run_command(command):
   return subprocess.check_output(["bash", "-lc", command], text=True)
 
 
-def write_condor_header(condor, farm_dir, universe, job_flavour, proxy):
-  condor.write("output = {}/job_common_$(Process).out\n".format(farm_dir))
-  condor.write("error  = {}/job_common_$(Process).err\n".format(farm_dir))
-  condor.write("log    = {}/job_common_$(Process).log\n".format(farm_dir))
+def write_condor_header(condor, farm_dir, log_dir, universe, job_flavour, proxy):
+  condor.write("output = {}/job_common_$(Process).out\n".format(log_dir))
+  condor.write("error  = {}/job_common_$(Process).err\n".format(log_dir))
+  condor.write("log    = {}/job_common_$(Process).log\n".format(log_dir))
   condor.write("executable = {}/$(cfgFile)\n".format(farm_dir))
   condor.write("universe = {}\n".format(universe))
   condor.write("on_exit_remove   = (ExitBySignal == False) && (ExitCode == 0)\n")
@@ -359,6 +359,7 @@ if __name__ == "__main__":
   parser.add_argument("--mode", choices=["produce", "merge"], default="produce")
   parser.add_argument("--variant", nargs="+", choices=["v4", "v5"], default=["v4", "v5"])
   parser.add_argument("--farm", default="FarmComparison", type=str)
+  parser.add_argument("--logdir", default=None, type=str)
   parser.add_argument("--outdir", required=True, type=str)
   parser.add_argument("--v4_dir", type=str)
   parser.add_argument("--v5_dir", type=str)
@@ -397,6 +398,10 @@ if __name__ == "__main__":
     raise RuntimeError("No samples found. Provide --sample-config or set sample-config/samples in the workflow config.")
 
   args.farm = os.path.abspath(args.farm)
+  if args.logdir is None:
+    args.logdir = args.farm
+  else:
+    args.logdir = os.path.abspath(args.logdir)
   args.outdir = os.path.abspath(args.outdir)
   if args.v4_dir is not None:
     args.v4_dir = os.path.abspath(args.v4_dir)
@@ -404,10 +409,11 @@ if __name__ == "__main__":
     args.v5_dir = os.path.abspath(args.v5_dir)
 
   check_dir(args.farm)
+  check_dir(args.logdir)
   condor_path = os.path.join(args.farm, "condor.sub")
   created_shells = []
   with open(condor_path, "w") as condor:
-    write_condor_header(condor, args.farm, args.universe, args.jobFlavour, args.proxy)
+    write_condor_header(condor, args.farm, args.logdir, args.universe, args.jobFlavour, args.proxy)
     if args.mode == "produce":
       created_shells = submit_production_jobs(config, condor, args.farm, args)
     else:
