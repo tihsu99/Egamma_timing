@@ -7,9 +7,6 @@ samples:
       TT_wTICL:
         dataset: /TT_TuneCP5_14TeV-powheg-pythia8/Phase2Spring24DIGIRECOMiniAOD-PU200_Trk1GeV_140X_mcRun4_realistic_v4-v2/GEN-SIM-DIGI-RAW-MINIAOD
         dbs_instance: prod/global
-      DY_wTICL_noPU:
-        dataset: /DYToLL_M-50_TuneCP5_14TeV-pythia8/Phase2Spring24DIGIRECOMiniAOD-noPU_Trk1GeV_140X_mcRun4_realistic_v4-v1/GEN-SIM-DIGI-RAW-MINIAOD
-        dbs_instance: prod/global
   photon:
     endcap:
       SinglePhoton2to200_wTICL:
