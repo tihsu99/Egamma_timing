@@ -16,6 +16,7 @@ import FWCore.ParameterSet.VarParsing as VarParsing
 options = VarParsing.VarParsing("analysis")
 options.register("sourceFile", "", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "File containing list of input files")
 options.register("photonLabel", "photonsHGC", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "Offline photon collection")
+options.register("offlineProcess", "reRECO", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "Offline process name")
 options.register("onlineLabel", "hltEgammaHLTExtra:Unseeded:HLT", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "Online EGammaObject collection")
 options.register("onlineCandidateLabel", "hltEgammaCandidatesUnseeded::HLTX", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "Online RecoEcalCandidate collection")
 options.register("onlineTracksterLabel", "hltTiclCandidate::HLTX", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "Online HLT trackster collection")
@@ -55,7 +56,7 @@ process.TFileService = cms.Service("TFileService", fileName=cms.string(out_file)
 
 process.ntuplizer = cms.EDAnalyzer(
     "PhotonComparisonNtuplizer",
-    photonProducer=cms.InputTag(options.photonLabel),
+    photonProducer=cms.InputTag(options.photonLabel, "", options.offlineProcess),
     onlineProducer=cms.InputTag(*options.onlineLabel.split(":")),
     onlineCandidateProducer=cms.InputTag(*options.onlineCandidateLabel.split(":")),
     onlineTracksterSrc=cms.InputTag(*options.onlineTracksterLabel.split(":")),
@@ -64,18 +65,18 @@ process.ntuplizer = cms.EDAnalyzer(
     onlineRecHitsEE_Src=cms.InputTag("hltHGCalRecHit", "HGCEERecHits", "HLTX"),
     onlineRecHitsFH_Src=cms.InputTag("hltHGCalRecHit", "HGCHEFRecHits", "HLTX"),
     onlineRecHitsBH_Src=cms.InputTag("hltHGCalRecHit", "HGCHEBRecHits", "HLTX"),
-    trackProducer=cms.InputTag("generalTracks"),
-    mtdt0=cms.InputTag("tofPID:t0"),
-    mtdSigmat0=cms.InputTag("tofPID:sigmat0"),
-    mtdTrkQualMVA=cms.InputTag("mtdTrackQualityMVA:mtdQualMVA"),
-    BeamspotProducer=cms.InputTag("offlineBeamSpot"),
-    vertexProducer=cms.InputTag("offlineSlimmedPrimaryVertices4D"),
+    trackProducer=cms.InputTag("generalTracks", "", options.offlineProcess),
+    mtdt0=cms.InputTag("tofPID", "t0", options.offlineProcess),
+    mtdSigmat0=cms.InputTag("tofPID", "sigmat0", options.offlineProcess),
+    mtdTrkQualMVA=cms.InputTag("mtdTrackQualityMVA", "mtdQualMVA", options.offlineProcess),
+    BeamspotProducer=cms.InputTag("offlineBeamSpot", "", options.offlineProcess),
+    vertexProducer=cms.InputTag("offlineSlimmedPrimaryVertices4D", "", options.offlineProcess),
     genParticles=cms.InputTag("prunedGenParticles"),
-    tracksterSrc=cms.InputTag("ticlTrackstersMerge"),
-    LayerClusterSrc=cms.InputTag("hgcalMergeLayerClusters"),
-    RecHitsEE_Src=cms.InputTag("HGCalRecHit", "HGCEERecHits"),
-    RecHitsFH_Src=cms.InputTag("HGCalRecHit", "HGCHEFRecHits"),
-    RecHitsBH_Src=cms.InputTag("HGCalRecHit", "HGCHEBRecHits"),
+    tracksterSrc=cms.InputTag("ticlTrackstersMerge", "", options.offlineProcess),
+    LayerClusterSrc=cms.InputTag("hgcalMergeLayerClusters", "", options.offlineProcess),
+    RecHitsEE_Src=cms.InputTag("HGCalRecHit", "HGCEERecHits", options.offlineProcess),
+    RecHitsFH_Src=cms.InputTag("HGCalRecHit", "HGCHEFRecHits", options.offlineProcess),
+    RecHitsBH_Src=cms.InputTag("HGCalRecHit", "HGCHEBRecHits", options.offlineProcess),
     ptMin=cms.double(1.0),
     intRadiusBarrel=cms.double(0.01),
     intRadiusEndcap=cms.double(0.01),

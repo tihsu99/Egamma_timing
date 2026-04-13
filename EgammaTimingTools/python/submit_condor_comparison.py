@@ -233,7 +233,7 @@ def build_production_commands(config, args, particle, region, sample, variant, i
 
   commands.append(
       "cmsRun {timing_dir}/python/{comparison_cfg} inputFiles={nt_input} outDir=$WORKDIR outFileNumber={file_index} "
-      "{label_arg} onlineLabel={online_label} onlineCandidateLabel={online_candidate_label} "
+      "{label_arg} offlineProcess=reRECO onlineLabel={online_label} onlineCandidateLabel={online_candidate_label} "
       "onlineTracksterLabel={online_trackster_label}".format(
           timing_dir=timing_dir,
           comparison_cfg=comparison_cfg,
