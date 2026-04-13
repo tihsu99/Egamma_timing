@@ -81,10 +81,26 @@ def seed_time_from_tracksters(trackster_pt, trackster_dr, trackster_time, tracks
   return ak.fill_none(weighted, -99.0)
 
 
+def incluster_time_from_tracksters(trackster_pt, trackster_dr, trackster_time, trackster_in_cluster):
+  in_cluster_tracksters = trackster_in_cluster & (trackster_pt > 1.0) & (trackster_dr < 0.3) & (trackster_time > -90.0)
+  weighted_sum = ak.sum(trackster_time[in_cluster_tracksters] * trackster_pt[in_cluster_tracksters], axis=1)
+  pt_sum = ak.sum(trackster_pt[in_cluster_tracksters], axis=1)
+  weighted = ak.where(pt_sum > 0, weighted_sum / pt_sum, -99.0)
+  return ak.fill_none(weighted, -99.0)
+
+
 def seed_time_from_layerclusters(layercluster_energy, layercluster_dr, layercluster_time, layercluster_is_seed):
   seed_clusters = layercluster_is_seed & (layercluster_energy > 0.5) & (layercluster_dr < 0.3) & (layercluster_time > -90.0)
   weighted_sum = ak.sum(layercluster_time[seed_clusters] * layercluster_energy[seed_clusters], axis=1)
   energy_sum = ak.sum(layercluster_energy[seed_clusters], axis=1)
+  weighted = ak.where(energy_sum > 0, weighted_sum / energy_sum, -99.0)
+  return ak.fill_none(weighted, -99.0)
+
+
+def incluster_time_from_layerclusters(layercluster_energy, layercluster_dr, layercluster_time, layercluster_in_cluster):
+  in_cluster_clusters = layercluster_in_cluster & (layercluster_energy > 0.5) & (layercluster_dr < 0.3) & (layercluster_time > -90.0)
+  weighted_sum = ak.sum(layercluster_time[in_cluster_clusters] * layercluster_energy[in_cluster_clusters], axis=1)
+  energy_sum = ak.sum(layercluster_energy[in_cluster_clusters], axis=1)
   weighted = ak.where(energy_sum > 0, weighted_sum / energy_sum, -99.0)
   return ak.fill_none(weighted, -99.0)
 
@@ -129,6 +145,14 @@ def scenario_collections(events, scenario, particle):
   references = {
       "seed": seed_time,
   }
+  trackster_cluster_time = incluster_time_from_tracksters(
+      events["Trackster_pt"],
+      events["Trackster_dr"],
+      trackster_time,
+      events["Trackster_inCluster"],
+  )
+  payload["trackster_cluster_time"] = ak.to_numpy(trackster_cluster_time)
+  references["tracksterCluster"] = trackster_cluster_time
 
   collections = {
       "trackster": {
@@ -172,6 +196,23 @@ def scenario_collections(events, scenario, particle):
         )
     )
     references["layerClusterSeed"] = layercluster_seed_time
+    layercluster_cluster_time = incluster_time_from_layerclusters(
+        events["LayerCluster_energy"],
+        events["LayerCluster_dr"],
+        events["LayerCluster_Time"],
+        events["LayerCluster_inCluster"],
+    )
+    payload["layercluster_cluster_time"] = ak.to_numpy(layercluster_cluster_time)
+    payload["layercluster_cluster_mult"] = ak.to_numpy(
+        ak.sum(
+            events["LayerCluster_inCluster"] &
+            (events["LayerCluster_energy"] > 0.5) &
+            (events["LayerCluster_dr"] < 0.3) &
+            (events["LayerCluster_Time"] > -90.0),
+            axis=1,
+        )
+    )
+    references["layerClusterCluster"] = layercluster_cluster_time
 
   if scenario in OFFLINE_SCENARIOS:
     references["pv"] = events["PV_Time"]
@@ -283,8 +324,11 @@ def build_dataframe(events, scenario, particle, process_name, is_signal):
       "eg_eta": "eg-eta",
       "eg_phi": "eg-phi",
       "seed_time": "eg-seedTime",
+      "trackster_cluster_time": "eg-tracksterClusterTime",
       "layercluster_seed_time": "eg-layerClusterSeedTime",
       "layercluster_seed_mult": "eg-layerClusterSeedMultiplicity",
+      "layercluster_cluster_time": "eg-layerClusterClusterTime",
+      "layercluster_cluster_mult": "eg-layerClusterClusterMultiplicity",
   }, inplace=True)
 
   return df

@@ -255,14 +255,31 @@ def timing_arrays(events, scenario):
     seed_time = ak.fill_none(ak.mean(events["Trackster_Time"][seed_mask], axis=1), -99.0)
     arrays["SeedTime"] = ak.to_numpy(seed_time[seed_time > -90.0])
     arrays["SeedMultiplicity"] = ak.to_numpy(ak.sum(seed_mask, axis=1))
+    trackster_cluster_mask = (
+        events["Trackster_inCluster"] &
+        (events["Trackster_pt"] > 1.0) &
+        (events["Trackster_dr"] < 0.3) &
+        (events["Trackster_Time"] > -90.0)
+    )
+    trackster_cluster_weighted_sum = ak.sum(events["Trackster_Time"][trackster_cluster_mask] * events["Trackster_pt"][trackster_cluster_mask], axis=1)
+    trackster_cluster_pt_sum = ak.sum(events["Trackster_pt"][trackster_cluster_mask], axis=1)
+    trackster_cluster_time = ak.fill_none(ak.where(trackster_cluster_pt_sum > 0, trackster_cluster_weighted_sum / trackster_cluster_pt_sum, -99.0), -99.0)
+    arrays["TracksterClusterTime"] = ak.to_numpy(trackster_cluster_time[trackster_cluster_time > -90.0])
+    arrays["TracksterClusterMultiplicity"] = ak.to_numpy(ak.sum(trackster_cluster_mask, axis=1))
     arrays["Trackster_Time"] = ak.to_numpy(ak.flatten(events["Trackster_Time"][events["Trackster_Time"] > -90.0]))
     arrays["Trackster_TimeWrtSeed"] = ak.flatten(
         abs(events["Trackster_Time"] - ak.broadcast_arrays(seed_time, events["Trackster_Time"])[0])
+    )
+    arrays["Trackster_TimeWrtTracksterCluster"] = ak.flatten(
+        abs(events["Trackster_Time"] - ak.broadcast_arrays(trackster_cluster_time, events["Trackster_Time"])[0])
     )
   if "HGCRecHit_Time" in events.fields and "Trackster_Time" in events.fields:
     arrays["HGCRecHit_Time"] = ak.to_numpy(ak.flatten(events["HGCRecHit_Time"][events["HGCRecHit_Time"] > -90.0]))
     arrays["HGCRecHit_TimeWrtSeed"] = ak.flatten(
         abs(events["HGCRecHit_Time"] - ak.broadcast_arrays(seed_time, events["HGCRecHit_Time"])[0])
+    )
+    arrays["HGCRecHit_TimeWrtTracksterCluster"] = ak.flatten(
+        abs(events["HGCRecHit_Time"] - ak.broadcast_arrays(trackster_cluster_time, events["HGCRecHit_Time"])[0])
     )
   if scenario in ONLINE_SCENARIOS and "LayerCluster_Time" in events.fields and "Trackster_Time" in events.fields:
     layercluster_seed_mask = (
@@ -276,6 +293,20 @@ def timing_arrays(events, scenario):
     layercluster_seed_time = ak.fill_none(ak.where(energy_sum > 0, weighted_sum / energy_sum, -99.0), -99.0)
     arrays["LayerClusterSeedTime"] = ak.to_numpy(layercluster_seed_time[layercluster_seed_time > -90.0])
     arrays["LayerClusterSeedMultiplicity"] = ak.to_numpy(ak.sum(layercluster_seed_mask, axis=1))
+    layercluster_cluster_mask = (
+        events["LayerCluster_inCluster"] &
+        (events["LayerCluster_energy"] > 0.5) &
+        (events["LayerCluster_dr"] < 0.3) &
+        (events["LayerCluster_Time"] > -90.0)
+    )
+    layercluster_cluster_weighted_sum = ak.sum(events["LayerCluster_Time"][layercluster_cluster_mask] * events["LayerCluster_energy"][layercluster_cluster_mask], axis=1)
+    layercluster_cluster_energy_sum = ak.sum(events["LayerCluster_energy"][layercluster_cluster_mask], axis=1)
+    layercluster_cluster_time = ak.fill_none(
+        ak.where(layercluster_cluster_energy_sum > 0, layercluster_cluster_weighted_sum / layercluster_cluster_energy_sum, -99.0),
+        -99.0,
+    )
+    arrays["LayerClusterClusterTime"] = ak.to_numpy(layercluster_cluster_time[layercluster_cluster_time > -90.0])
+    arrays["LayerClusterClusterMultiplicity"] = ak.to_numpy(ak.sum(layercluster_cluster_mask, axis=1))
     arrays["LayerCluster_Time"] = ak.to_numpy(ak.flatten(events["LayerCluster_Time"][events["LayerCluster_Time"] > -90.0]))
     arrays["LayerCluster_TimeWrtSeed"] = ak.flatten(
         abs(events["LayerCluster_Time"] - ak.broadcast_arrays(seed_time, events["LayerCluster_Time"])[0])
@@ -288,6 +319,15 @@ def timing_arrays(events, scenario):
     )
     arrays["HGCRecHit_TimeWrtLayerClusterSeed"] = ak.flatten(
         abs(events["HGCRecHit_Time"] - ak.broadcast_arrays(layercluster_seed_time, events["HGCRecHit_Time"])[0])
+    )
+    arrays["Trackster_TimeWrtLayerClusterCluster"] = ak.flatten(
+        abs(events["Trackster_Time"] - ak.broadcast_arrays(layercluster_cluster_time, events["Trackster_Time"])[0])
+    )
+    arrays["LayerCluster_TimeWrtLayerClusterCluster"] = ak.flatten(
+        abs(events["LayerCluster_Time"] - ak.broadcast_arrays(layercluster_cluster_time, events["LayerCluster_Time"])[0])
+    )
+    arrays["HGCRecHit_TimeWrtLayerClusterCluster"] = ak.flatten(
+        abs(events["HGCRecHit_Time"] - ak.broadcast_arrays(layercluster_cluster_time, events["HGCRecHit_Time"])[0])
     )
   if scenario in OFFLINE_SCENARIOS:
     arrays["Track_TimeWrtPV"] = ak.flatten(abs(events["Track_Time"] - ak.broadcast_arrays(events["PV_Time"], events["Track_Time"])[0]))
@@ -315,23 +355,68 @@ def load_timing_payload_for_scenario(merged_dir, signal_merged_file, background_
   return scenario, scenario_payload
 
 
+def timing_plot_bins(variable, scenario_payload, valid_scenarios, signal_process, background_process):
+  combined = []
+  for scenario in valid_scenarios:
+    for process_name in [signal_process, background_process]:
+      values = scenario_payload[scenario].get(process_name, {}).get(variable)
+      if values is None or len(values) == 0:
+        continue
+      combined.append(values)
+
+  if not combined:
+    return None
+
+  combined = np.concatenate(combined)
+  combined = combined[np.isfinite(combined)]
+  if combined.size == 0:
+    return None
+
+  if variable in {"SeedMultiplicity", "LayerClusterSeedMultiplicity", "TracksterClusterMultiplicity", "LayerClusterClusterMultiplicity"}:
+    upper = int(np.ceil(np.quantile(combined, 0.99)))
+    upper = max(upper, 1)
+    return np.arange(-0.5, upper + 1.5, 1.0)
+
+  low = float(np.quantile(combined, 0.001))
+  high = float(np.quantile(combined, 0.995))
+
+  if variable.endswith("Time") or "Wrt" in variable or "SeedTime" in variable:
+    low = min(low, 0.0)
+  if not np.isfinite(low) or not np.isfinite(high) or high <= low:
+    low = float(np.min(combined))
+    high = float(np.max(combined))
+  if high <= low:
+    high = low + 1e-3
+
+  return np.linspace(low, high, 70)
+
+
 def plot_timing_distributions(merged_dir, signal_merged_file, background_merged_file, particle, region, signal_process, background_process, plotdir, n_workers=1):
   common_variables = [
       "SeedTime",
       "SeedMultiplicity",
+      "TracksterClusterTime",
+      "TracksterClusterMultiplicity",
       "Trackster_Time",
       "Trackster_TimeWrtSeed",
+      "Trackster_TimeWrtTracksterCluster",
       "HGCRecHit_Time",
       "HGCRecHit_TimeWrtSeed",
+      "HGCRecHit_TimeWrtTracksterCluster",
   ]
   online_only = [
       "LayerClusterSeedTime",
       "LayerClusterSeedMultiplicity",
+      "LayerClusterClusterTime",
+      "LayerClusterClusterMultiplicity",
       "LayerCluster_Time",
       "LayerCluster_TimeWrtSeed",
       "Trackster_TimeWrtLayerClusterSeed",
       "LayerCluster_TimeWrtLayerClusterSeed",
       "HGCRecHit_TimeWrtLayerClusterSeed",
+      "Trackster_TimeWrtLayerClusterCluster",
+      "LayerCluster_TimeWrtLayerClusterCluster",
+      "HGCRecHit_TimeWrtLayerClusterCluster",
   ]
   offline_only = [
       "Track_TimeWrtPV",
@@ -379,9 +464,16 @@ def plot_timing_distributions(merged_dir, signal_merged_file, background_merged_
   for variable in variable_iter:
     valid_scenarios = []
     for scenario in SCENARIOS:
-      if variable in scenario_payload[scenario].get(signal_process, {}):
+      if (
+          variable in scenario_payload[scenario].get(signal_process, {}) or
+          variable in scenario_payload[scenario].get(background_process, {})
+      ):
         valid_scenarios.append(scenario)
     if not valid_scenarios:
+      continue
+
+    bins = timing_plot_bins(variable, scenario_payload, valid_scenarios, signal_process, background_process)
+    if bins is None:
       continue
 
     for process_name, label in [(signal_process, "signal"), (background_process, "background")]:
@@ -391,12 +483,6 @@ def plot_timing_distributions(merged_dir, signal_merged_file, background_merged_
         values = scenario_payload[scenario][process_name].get(variable)
         if values is None or len(values) == 0:
           continue
-        if variable == "SeedMultiplicity":
-          bins = np.arange(-0.5, 10.5, 1.0)
-        elif "Wrt" in variable or variable.endswith("_Time") or variable == "SeedTime":
-          bins = np.linspace(0.0, 0.25, 60) if variable != "SeedTime" else np.linspace(-0.1, 0.25, 70)
-        else:
-          bins = np.linspace(0.0, 0.25, 60)
         plt.hist(values, bins=bins, density=True, histtype="step", linewidth=2, label=scenario)
         drew = True
       if not drew:
@@ -506,6 +592,28 @@ def main():
     )
     plot_auc_scan(online_frames, collection_name, veto_mode, "layerClusterSeed", args.plotDir)
     print("[roc] {} {} ref=layerClusterSeed".format(collection_name, veto_mode))
+
+  online_cluster_ref_tasks = [
+      (reference_name, collection_name, veto_mode)
+      for reference_name in ["tracksterCluster", "layerClusterCluster"]
+      for collection_name in ["trackster", "HGCRecHit", "layerCluster"]
+      for veto_mode in ["cone", "seed", "cluster"]
+  ]
+  online_cluster_ref_iter = online_cluster_ref_tasks
+  if tqdm is not None:
+    online_cluster_ref_iter = tqdm(online_cluster_ref_tasks, desc="Online inCluster ROC", unit="scan")
+  for reference_name, collection_name, veto_mode in online_cluster_ref_iter:
+    key = f"{collection_name}_{veto_mode}_{reference_name}"
+    summary[key] = plot_roc_by_scenario(
+        online_frames,
+        collection_name,
+        veto_mode,
+        reference_name,
+        args.plotDir,
+        include_default_online=(collection_name != "layerCluster"),
+    )
+    plot_auc_scan(online_frames, collection_name, veto_mode, reference_name, args.plotDir)
+    print("[roc] {} {} ref={}".format(collection_name, veto_mode, reference_name))
 
   offline_frames = {scenario: frames[scenario] for scenario in SCENARIOS if scenario in OFFLINE_SCENARIOS}
   offline_tasks = [
