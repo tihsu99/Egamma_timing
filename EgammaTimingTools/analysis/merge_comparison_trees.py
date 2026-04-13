@@ -20,6 +20,13 @@ def is_rootcompat(array):
   return False
 
 
+def packed_array(array):
+  array = ak.without_parameters(array)
+  if hasattr(ak, "to_packed"):
+    return ak.to_packed(array)
+  return ak.packed(array)
+
+
 def uproot_writeable(events):
   output = dict()
   for branch_name in events.fields:
@@ -28,11 +35,11 @@ def uproot_writeable(events):
       for field in events[branch_name].fields:
         if is_rootcompat(events[branch_name][field]):
           nested[field] = events[branch_name][field]
-      output[branch_name] = ak.packed(ak.without_parameters(ak.zip(nested)))
+      output[branch_name] = packed_array(ak.zip(nested))
     else:
       if "offset" in branch_name:
         continue
-      output[branch_name] = ak.packed(ak.without_parameters(events[branch_name]))
+      output[branch_name] = packed_array(events[branch_name])
   return output
 
 
