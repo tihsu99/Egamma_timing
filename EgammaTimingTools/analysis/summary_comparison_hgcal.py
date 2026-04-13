@@ -12,6 +12,11 @@ import pandas as pd
 import uproot
 from sklearn.metrics import auc, roc_curve
 
+try:
+  from tqdm import tqdm
+except ImportError:
+  tqdm = None
+
 
 SCENARIOS = ["online_v4", "online_v5", "offline_v4", "offline_v5"]
 ONLINE_SCENARIOS = {"online_v4", "online_v5"}
@@ -204,7 +209,18 @@ def read_merged_tree(files, tree_name):
   if not files:
     raise RuntimeError("No merged ROOT files found for tree {}".format(tree_name))
   print("[read] tree={} files={}".format(tree_name, len(files)))
-  return uproot.concatenate([f"{name}:{tree_name}" for name in files], library="ak")
+  try:
+    if len(files) == 1:
+      return uproot.open(files[0])[tree_name].arrays(library="ak")
+    return uproot.concatenate([f"{name}:{tree_name}" for name in files], library="ak")
+  except ValueError as exc:
+    message = str(exc)
+    if "entries in normal baskets" in message and "don't add up to expected number of entries" in message:
+      raise RuntimeError(
+          "The merged ROOT file looks inconsistent for uproot reading, likely from `hadd` over uproot-written jagged TTrees. "
+          "Use the original merged file directory instead of the hadd output, or pass non-hadded signal/background files."
+      ) from exc
+    raise
 
 
 def merged_files(merged_dir, particle, region, process_name):
@@ -277,7 +293,7 @@ def timing_arrays(events, scenario):
   return {name: ak.to_numpy(values[(values > -90) & (values < 900)]) for name, values in arrays.items()}
 
 
-def plot_timing_distributions(merged_dir, merged_file, particle, region, signal_process, background_process, plotdir):
+def plot_timing_distributions(merged_dir, signal_merged_file, background_merged_file, particle, region, signal_process, background_process, plotdir):
   common_variables = ["Trackster_TimeWrtSeed", "HGCRecHit_TimeWrtSeed"]
   online_only = ["LayerCluster_TimeWrtSeed"]
   offline_only = [
@@ -296,6 +312,7 @@ def plot_timing_distributions(merged_dir, merged_file, particle, region, signal_
   for scenario in SCENARIOS:
     scenario_payload[scenario] = {}
     for process_name, is_signal in [(signal_process, True), (background_process, False)]:
+      merged_file = signal_merged_file if is_signal else background_merged_file
       files = resolve_merged_files(merged_dir, merged_file, particle, region, process_name)
       events = read_merged_tree(files, scenario)
       if is_signal:
@@ -304,7 +321,10 @@ def plot_timing_distributions(merged_dir, merged_file, particle, region, signal_
         events = events[events[matched_branch] != 1]
       scenario_payload[scenario][process_name] = timing_arrays(events, scenario)
 
-  for variable in common_variables + online_only + offline_only:
+  variable_iter = common_variables + online_only + offline_only
+  if tqdm is not None:
+    variable_iter = tqdm(variable_iter, desc="Timing plots", unit="plot")
+  for variable in variable_iter:
     valid_scenarios = []
     for scenario in SCENARIOS:
       if variable in scenario_payload[scenario].get(signal_process, {}):
@@ -343,6 +363,8 @@ def main():
   parser.add_argument("--isoDir", required=True, type=str)
   parser.add_argument("--mergedDir", type=str)
   parser.add_argument("--mergedFile", type=str)
+  parser.add_argument("--signal-merged-file", type=str)
+  parser.add_argument("--background-merged-file", type=str)
   parser.add_argument("--plotDir", required=True, type=str)
   parser.add_argument("--particle", required=True, choices=["electron", "photon"])
   parser.add_argument("--region", required=True, type=str)
@@ -351,26 +373,36 @@ def main():
   args = parser.parse_args()
 
   if not args.mergedDir and not args.mergedFile:
-    raise RuntimeError("Provide either --mergedDir or --mergedFile")
+    if not args.signal_merged_file or not args.background_merged_file:
+      raise RuntimeError("Provide --mergedDir, --mergedFile, or both --signal-merged-file and --background-merged-file")
 
   check_dir(args.plotDir)
 
   frames = {}
-  for scenario in SCENARIOS:
+  scenario_iter = SCENARIOS
+  if tqdm is not None:
+    scenario_iter = tqdm(SCENARIOS, desc="Loading scenarios", unit="scenario")
+  for scenario in scenario_iter:
     print("[summary] scenario={}".format(scenario))
     sig_df = load_frame(args.isoDir, args.particle, args.region, scenario, args.signal)
     bkg_df = load_frame(args.isoDir, args.particle, args.region, scenario, args.background)
     frames[scenario] = apply_reweighting(sig_df, bkg_df)
 
   summary = {}
-  for collection_name in ["trackster", "HGCRecHit"]:
-    for veto_mode in ["cone", "seed", "cluster"]:
+  roc_tasks = [(collection_name, veto_mode) for collection_name in ["trackster", "HGCRecHit"] for veto_mode in ["cone", "seed", "cluster"]]
+  roc_iter = roc_tasks
+  if tqdm is not None:
+    roc_iter = tqdm(roc_tasks, desc="Common ROC scans", unit="scan")
+  for collection_name, veto_mode in roc_iter:
       key = f"{collection_name}_{veto_mode}_seed"
       summary[key] = plot_roc_by_scenario(frames, collection_name, veto_mode, "seed", args.plotDir, include_default_online=True)
       plot_auc_scan(frames, collection_name, veto_mode, "seed", args.plotDir)
       print("[roc] {} {} ref=seed".format(collection_name, veto_mode))
 
-  for veto_mode in ["cone", "seed", "cluster"]:
+  online_iter = ["cone", "seed", "cluster"]
+  if tqdm is not None:
+    online_iter = tqdm(online_iter, desc="Online layerCluster ROC", unit="scan")
+  for veto_mode in online_iter:
     key = f"layerCluster_{veto_mode}_seed"
     summary[key] = plot_roc_by_scenario(
         {scenario: frames[scenario] for scenario in SCENARIOS if scenario in ONLINE_SCENARIOS},
@@ -383,9 +415,16 @@ def main():
     print("[roc] layerCluster {} ref=seed".format(veto_mode))
 
   offline_frames = {scenario: frames[scenario] for scenario in SCENARIOS if scenario in OFFLINE_SCENARIOS}
-  for reference_name in OFFLINE_ONLY_REFERENCES:
-    for collection_name in ["trackster", "HGCRecHit"]:
-      for veto_mode in ["cone", "seed", "cluster"]:
+  offline_tasks = [
+      (reference_name, collection_name, veto_mode)
+      for reference_name in OFFLINE_ONLY_REFERENCES
+      for collection_name in ["trackster", "HGCRecHit"]
+      for veto_mode in ["cone", "seed", "cluster"]
+  ]
+  offline_iter = offline_tasks
+  if tqdm is not None:
+    offline_iter = tqdm(offline_tasks, desc="Offline-only ROC scans", unit="scan")
+  for reference_name, collection_name, veto_mode in offline_iter:
         key = f"{collection_name}_{veto_mode}_{reference_name}"
         summary[key] = plot_roc_by_scenario(offline_frames, collection_name, veto_mode, reference_name, args.plotDir)
         plot_auc_scan(offline_frames, collection_name, veto_mode, reference_name, args.plotDir)
@@ -395,7 +434,18 @@ def main():
     json.dump(summary, handle, indent=2, sort_keys=True)
   print("[saved] {}".format(os.path.join(args.plotDir, "roc_summary.json")))
 
-  plot_timing_distributions(args.mergedDir, args.mergedFile, args.particle, args.region, args.signal, args.background, args.plotDir)
+  signal_merged_file = args.signal_merged_file if args.signal_merged_file else args.mergedFile
+  background_merged_file = args.background_merged_file if args.background_merged_file else args.mergedFile
+  plot_timing_distributions(
+      args.mergedDir,
+      signal_merged_file,
+      background_merged_file,
+      args.particle,
+      args.region,
+      args.signal,
+      args.background,
+      args.plotDir,
+  )
 
 
 if __name__ == "__main__":

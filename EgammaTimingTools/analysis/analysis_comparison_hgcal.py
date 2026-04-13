@@ -8,6 +8,11 @@ import numpy as np
 import pandas as pd
 import uproot
 
+try:
+  from tqdm import tqdm
+except ImportError:
+  tqdm = None
+
 
 SCENARIOS = ["online_v4", "online_v5", "offline_v4", "offline_v5"]
 COMMON_SCENARIOS = {"online_v4", "online_v5", "offline_v4", "offline_v5"}
@@ -49,7 +54,18 @@ def read_tree(files, tree_name):
   if not files:
     raise RuntimeError("No ROOT files found for tree {}".format(tree_name))
   print("[read] tree={} files={}".format(tree_name, len(files)))
-  return uproot.concatenate([f"{name}:{tree_name}" for name in files], library="ak")
+  try:
+    if len(files) == 1:
+      return uproot.open(files[0])[tree_name].arrays(library="ak")
+    return uproot.concatenate([f"{name}:{tree_name}" for name in files], library="ak")
+  except ValueError as exc:
+    message = str(exc)
+    if "entries in normal baskets" in message and "don't add up to expected number of entries" in message:
+      raise RuntimeError(
+          "The input ROOT file looks inconsistent for uproot reading, likely from `hadd` over uproot-written jagged TTrees. "
+          "Use the original merged file directory instead of the hadd output, or pass non-hadded per-process files."
+      ) from exc
+    raise
 
 
 def absolute_time_difference(values, reference):
@@ -263,6 +279,8 @@ def main():
   parser = argparse.ArgumentParser(description="Build HGCal timing/isolation parquet tables from merged comparison ntuples")
   parser.add_argument("--inputDir", type=str, help="Merged ROOT base directory")
   parser.add_argument("--inputFile", type=str, help="Single merged ROOT file")
+  parser.add_argument("--signal-file", type=str, help="Explicit merged ROOT file for the signal process")
+  parser.add_argument("--background-file", type=str, help="Explicit merged ROOT file for the background process")
   parser.add_argument("--outDir", required=True, type=str, help="Output parquet directory")
   parser.add_argument("--particle", required=True, choices=["electron", "photon"])
   parser.add_argument("--region", required=True, type=str)
@@ -272,12 +290,18 @@ def main():
   args = parser.parse_args()
 
   if not args.inputDir and not args.inputFile:
-    raise RuntimeError("Provide either --inputDir or --inputFile")
+    if not args.signal_file or not args.background_file:
+      raise RuntimeError("Provide --inputDir, --inputFile, or both --signal-file and --background-file")
 
   scenarios = args.scenario if args.scenario else SCENARIOS
-  for scenario in scenarios:
-    write_scenario_parquet(args.inputDir, args.inputFile, args.outDir, args.particle, args.region, scenario, args.signal, True)
-    write_scenario_parquet(args.inputDir, args.inputFile, args.outDir, args.particle, args.region, scenario, args.background, False)
+  scenario_iter = scenarios
+  if tqdm is not None:
+    scenario_iter = tqdm(scenarios, desc="Scenarios", unit="scenario")
+  for scenario in scenario_iter:
+    signal_file = args.signal_file if args.signal_file else args.inputFile
+    background_file = args.background_file if args.background_file else args.inputFile
+    write_scenario_parquet(args.inputDir, signal_file, args.outDir, args.particle, args.region, scenario, args.signal, True)
+    write_scenario_parquet(args.inputDir, background_file, args.outDir, args.particle, args.region, scenario, args.background, False)
 
 
 if __name__ == "__main__":
