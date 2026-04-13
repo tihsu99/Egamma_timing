@@ -89,6 +89,7 @@ workflow:
     process.MINIAODSIMoutput.outputCommands.append('keep ticlTracksters_*_*_*');
     process.MINIAODSIMoutput.outputCommands.append('keep *_ticlTrackstersMerge_*_*');
     process.MINIAODSIMoutput.outputCommands.append('keep *_hgcalLayerClusters_*_*');
+    process.MINIAODSIMoutput.outputCommands.append('keep *_HGCalRecHit_*_*');
     process.MINIAODSIMoutput.outputCommands.append('keep recoCaloClusters*_*_*_*');
     process.MINIAODSIMoutput.outputCommands.append('keep HGCRecHitsSorted_*_*_*');
   commands:
