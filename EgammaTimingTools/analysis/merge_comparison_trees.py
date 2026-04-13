@@ -37,7 +37,12 @@ def uproot_writeable(events):
 
 
 def read_tree(file_name, tree_name):
-  return uproot.open(file_name)[tree_name].arrays(library="ak")
+  root_file = uproot.open(file_name)
+  candidates = [tree_name, "ntuplizer/{}".format(tree_name)]
+  for candidate in candidates:
+    if candidate in root_file:
+      return root_file[candidate].arrays(library="ak")
+  raise KeyError("Unable to find tree '{}' in {}. Available keys: {}".format(tree_name, file_name, list(root_file.keys())))
 
 
 def key_tuple(events, index):
