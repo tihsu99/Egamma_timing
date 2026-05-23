@@ -19,7 +19,8 @@ options.register("photonLabel", "photonsHGC", VarParsing.VarParsing.multiplicity
 options.register("offlineProcess", "reRECO", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "Offline process name")
 options.register("onlineLabel", "hltEgammaHLTExtra:Unseeded:HLT", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "Online EGammaObject collection")
 options.register("onlineCandidateLabel", "hltEgammaCandidatesUnseeded::HLTX", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "Online RecoEcalCandidate collection")
-options.register("onlineTracksterLabel", "hltTiclCandidate::HLTX", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "Online HLT trackster collection")
+options.register("onlineTracksterLabel", "ticlTrackstersMerge::HLTX", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "Online HLT trackster collection")
+options.register("propagateHGCalTimingToOrigin", 0, VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.int, "Propagate HGCal timing to the interaction origin")
 options.register("outDir", "", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "Output directory")
 options.register("outFileNumber", -1, VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.int, "Output file number")
 options.parseArguments()
@@ -60,8 +61,8 @@ process.ntuplizer = cms.EDAnalyzer(
     onlineProducer=cms.InputTag(*options.onlineLabel.split(":")),
     onlineCandidateProducer=cms.InputTag(*options.onlineCandidateLabel.split(":")),
     onlineTracksterSrc=cms.InputTag(*options.onlineTracksterLabel.split(":")),
-    onlineLayerClusterSrc=cms.InputTag("hltMergeLayerClusters", "", "HLTX"),
-    onlineTimeLayerClusterSrc=cms.InputTag("hltMergeLayerClusters", "timeLayerCluster", "HLTX"),
+    onlineLayerClusterSrc=cms.InputTag("hgcalMergeLayerClusters", "", "HLTX"),
+    onlineTimeLayerClusterSrc=cms.InputTag("hgcalMergeLayerClusters", "timeLayerCluster", "HLTX"),
     onlineRecHitsEE_Src=cms.InputTag("hltHGCalRecHit", "HGCEERecHits", "HLTX"),
     onlineRecHitsFH_Src=cms.InputTag("hltHGCalRecHit", "HGCHEFRecHits", "HLTX"),
     onlineRecHitsBH_Src=cms.InputTag("hltHGCalRecHit", "HGCHEBRecHits", "HLTX"),
@@ -87,6 +88,7 @@ process.ntuplizer = cms.EDAnalyzer(
     extRadius=cms.double(0.3),
     gen_deltaR=cms.double(0.1),
     isMC=cms.bool(True),
+    propagateHGCalTimingToOrigin=cms.bool(bool(options.propagateHGCalTimingToOrigin)),
 )
 
 process.load("Configuration.StandardSequences.Services_cff")

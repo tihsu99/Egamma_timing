@@ -8,19 +8,18 @@ sample-config: comparison_samples_example.yaml
 
 variants:
   v4:
-    # Official HLT_75e33 uses hltEgammaCandidatesUnseeded with the default
-    # HGCal supercluster chain, whose PFCluster builder consumes
-    # hltTiclTrackstersCLUE3DHigh.
+    # Use the TrackstersMergeProducer output for the HGCal timing comparison.
     proc_modifier: ""
     online_candidate_label: hltEgammaCandidatesUnseeded::HLTX
-    online_trackster_label: hltTiclTrackstersCLUE3DHigh::HLTX
+    online_trackster_label: ticlTrackstersMerge::HLTX
+    propagate_hgcal_timing_to_origin: false
   v5:
-    # With --procModifiers ticl_v5, the HLT menu switches the endcap egamma
-    # candidate chain to hltTiclEGammaSuperClusterProducerUnseeded and the
-    # underlying HGCal PFCluster builder consumes hltTiclCandidate.
+    # TICL v5 stores HGCal timing at the detector; propagate it back to the
+    # origin so v4 and v5 are compared in the same reference frame.
     proc_modifier: "--procModifiers ticl_v5"
     online_candidate_label: hltEgammaCandidatesUnseeded::HLTX
-    online_trackster_label: hltTiclCandidate::HLTX
+    online_trackster_label: ticlTrackstersMerge::HLTX
+    propagate_hgcal_timing_to_origin: true
 
 particles:
   electron:
@@ -53,8 +52,9 @@ workflow:
     process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltEgammaCandidatesUnseeded_*_*');
     process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltHGCalRecHit_*_*');
     process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltMergeLayerClusters_*_*');
+    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hgcalMergeLayerClusters_*_*');
     process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltTiclCandidate_*_*');
-    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltTiclTrackstersCLUE3DHigh_*_*');
+    process.FEVTDEBUGHLToutput.outputCommands.append('keep *_ticlTrackstersMerge_*_*');
     process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltParticleFlowSuperClusterECALUnseeded_*_*');
     process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltParticleFlowSuperClusterHGCalFromTICLUnseeded_*_*');
     process.FEVTDEBUGHLToutput.outputCommands.append('keep *_hltTiclEGammaSuperClusterProducerUnseeded_*_*');
@@ -68,8 +68,9 @@ workflow:
     process.MINIAODSIMoutput.outputCommands.append('keep *_hltEgammaCandidatesUnseeded_*_HLTX');
     process.MINIAODSIMoutput.outputCommands.append('keep *_hltHGCalRecHit_*_HLTX');
     process.MINIAODSIMoutput.outputCommands.append('keep *_hltMergeLayerClusters_*_HLTX');
+    process.MINIAODSIMoutput.outputCommands.append('keep *_hgcalMergeLayerClusters_*_HLTX');
     process.MINIAODSIMoutput.outputCommands.append('keep *_hltTiclCandidate_*_HLTX');
-    process.MINIAODSIMoutput.outputCommands.append('keep *_hltTiclTrackstersCLUE3DHigh_*_HLTX');
+    process.MINIAODSIMoutput.outputCommands.append('keep *_ticlTrackstersMerge_*_HLTX');
     process.MINIAODSIMoutput.outputCommands.append('keep *_hltParticleFlowSuperClusterECALUnseeded_*_HLTX');
     process.MINIAODSIMoutput.outputCommands.append('keep *_hltParticleFlowSuperClusterHGCalFromTICLUnseeded_*_HLTX');
     process.MINIAODSIMoutput.outputCommands.append('keep *_hltTiclEGammaSuperClusterProducerUnseeded_*_HLTX');

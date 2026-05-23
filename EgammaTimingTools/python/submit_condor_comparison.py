@@ -194,7 +194,8 @@ def build_production_commands(config, args, particle, region, sample, variant, i
   comparison_cfg = particle_cfg["ntuplizer_cfg"]
   online_label = particle_cfg["online_label"]
   online_candidate_label = variant_cfg.get("online_candidate_label", "hltEgammaCandidatesUnseeded::HLTX")
-  online_trackster_label = variant_cfg.get("online_trackster_label", "hltTiclCandidate::HLTX")
+  online_trackster_label = variant_cfg.get("online_trackster_label", "ticlTrackstersMerge::HLTX")
+  propagate_hgcal_timing = int(bool(variant_cfg.get("propagate_hgcal_timing_to_origin", False)))
   comparison_input = workflow_cfg["ntuplizer_input"]
 
   placeholders = {
@@ -214,6 +215,7 @@ def build_production_commands(config, args, particle, region, sample, variant, i
       "online_label": online_label,
       "online_candidate_label": online_candidate_label,
       "online_trackster_label": online_trackster_label,
+      "propagate_hgcal_timing_to_origin": propagate_hgcal_timing,
       "comparison_input": comparison_input,
       "output_file": output_file,
       "workdir": "$WORKDIR",
@@ -240,7 +242,8 @@ def build_production_commands(config, args, particle, region, sample, variant, i
   commands.append(
       "cmsRun {timing_dir}/python/{comparison_cfg} inputFiles={nt_input} outDir=$WORKDIR outFileNumber={file_index} "
       "{label_arg} offlineProcess=reRECO onlineLabel={online_label} onlineCandidateLabel={online_candidate_label} "
-      "onlineTracksterLabel={online_trackster_label}".format(
+      "onlineTracksterLabel={online_trackster_label} "
+      "propagateHGCalTimingToOrigin={propagate_hgcal_timing_to_origin}".format(
           timing_dir=timing_dir,
           comparison_cfg=comparison_cfg,
           nt_input=ntuplizer_input,
@@ -249,6 +252,7 @@ def build_production_commands(config, args, particle, region, sample, variant, i
           online_label=online_label,
           online_candidate_label=online_candidate_label,
           online_trackster_label=online_trackster_label,
+          propagate_hgcal_timing_to_origin=propagate_hgcal_timing,
       )
   )
   if args.max_events is not None:

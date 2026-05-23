@@ -225,6 +225,7 @@ private:
   const double gen_deltaR_;
   int dzOption_;
   const bool isMC_;
+  const bool propagateHGCalTimingToOrigin_;
 
   hgcal::RecHitTools recHitTools_;
 
@@ -265,7 +266,8 @@ PhotonComparisonNtuplizer::PhotonComparisonNtuplizer(const edm::ParameterSet& co
       stripEndcap_{config.getParameter<double>("stripEndcap")},
       extRadius_{config.getParameter<double>("extRadius")},
       gen_deltaR_{config.getParameter<double>("gen_deltaR")},
-      isMC_{config.getParameter<bool>("isMC")} {
+      isMC_{config.getParameter<bool>("isMC")},
+      propagateHGCalTimingToOrigin_{config.getParameter<bool>("propagateHGCalTimingToOrigin")} {
   setDzOption("vz");
   usesResource(TFileService::kSharedResource);
 
@@ -743,7 +745,12 @@ void PhotonComparisonNtuplizer::analyze(const edm::Event& iEvent, const edm::Eve
         Trackster_eta_.push_back(momentum.eta());
         Trackster_phi_.push_back(momentum.phi());
         Trackster_dr_.push_back(dr);
-        Trackster_Time_.push_back(trackster.time());
+        double tracksterTime = trackster.time();
+        if (propagateHGCalTimingToOrigin_) {
+          const auto& barycenter = trackster.barycenter();
+          tracksterTime = egammaTiming::timeAtOrigin(trackster.time(), barycenter.X(), barycenter.Y(), barycenter.Z());
+        }
+        Trackster_Time_.push_back(tracksterTime);
         Trackster_TimeErr_.push_back(trackster.timeError());
         Trackster_TrackIdx_.push_back(trackster.trackIdx());
         if (trackster.trackIdx() >= 0) {
@@ -829,7 +836,10 @@ void PhotonComparisonNtuplizer::analyze(const edm::Event& iEvent, const edm::Eve
       RecHit_phi_.push_back(phi);
       RecHit_layer_.push_back(recHitTools_.getLayerWithOffset(hit.id()));
       RecHit_energy_.push_back(hit.energy());
-      RecHit_time_.push_back(hit.time());
+      const double hitTime = propagateHGCalTimingToOrigin_
+                                 ? egammaTiming::timeAtOrigin(hit.time(), position.x(), position.y(), position.z())
+                                 : hit.time();
+      RecHit_time_.push_back(hitTime);
       RecHit_time_error_.push_back(hit.timeError());
       RecHit_isSeeded_.push_back(isSeeded);
       RecHit_inCluster_.push_back(inCluster);
@@ -899,7 +909,11 @@ void PhotonComparisonNtuplizer::analyze(const edm::Event& iEvent, const edm::Eve
           if (onlineLayerClusterTimeHandle.isValid()) {
             edm::Ref<reco::CaloClusterCollection> clusterRef(onlineLayerClusterHandle, clusterIndex);
             const auto timePair = (*onlineLayerClusterTimeHandle)[clusterRef];
-            online_LayerCluster_Time_.push_back(timePair.first);
+            const double clusterTime =
+                propagateHGCalTimingToOrigin_
+                    ? egammaTiming::timeAtOrigin(timePair.first, cluster.x(), cluster.y(), cluster.z())
+                    : timePair.first;
+            online_LayerCluster_Time_.push_back(clusterTime);
             online_LayerCluster_TimeErr_.push_back(timePair.second);
           } else {
             online_LayerCluster_Time_.push_back(-99.);
@@ -933,7 +947,12 @@ void PhotonComparisonNtuplizer::analyze(const edm::Event& iEvent, const edm::Eve
           online_Trackster_pt_.push_back(trackster.raw_pt());
           online_Trackster_eta_.push_back(momentum.eta());
           online_Trackster_phi_.push_back(momentum.phi());
-          online_Trackster_Time_.push_back(trackster.time());
+          double tracksterTime = trackster.time();
+          if (propagateHGCalTimingToOrigin_) {
+            const auto& barycenter = trackster.barycenter();
+            tracksterTime = egammaTiming::timeAtOrigin(trackster.time(), barycenter.X(), barycenter.Y(), barycenter.Z());
+          }
+          online_Trackster_Time_.push_back(tracksterTime);
           online_Trackster_TimeErr_.push_back(trackster.timeError());
           online_Trackster_isSeed_.push_back(isSeedTrackster);
           online_Trackster_inCluster_.push_back(tracksterInCluster);
@@ -971,7 +990,10 @@ void PhotonComparisonNtuplizer::analyze(const edm::Event& iEvent, const edm::Eve
           online_RecHit_phi_.push_back(phi);
           online_RecHit_layer_.push_back(recHitTools_.getLayerWithOffset(hit.id()));
           online_RecHit_energy_.push_back(hit.energy());
-          online_RecHit_time_.push_back(hit.time());
+          const double hitTime = propagateHGCalTimingToOrigin_
+                                     ? egammaTiming::timeAtOrigin(hit.time(), position.x(), position.y(), position.z())
+                                     : hit.time();
+          online_RecHit_time_.push_back(hitTime);
           online_RecHit_time_error_.push_back(hit.timeError());
           online_RecHit_isSeeded_.push_back(isSeeded);
           online_RecHit_inCluster_.push_back(inCluster);
@@ -1003,9 +1025,9 @@ void PhotonComparisonNtuplizer::fillDescriptions(edm::ConfigurationDescriptions&
   desc.add<edm::InputTag>("photonProducer", edm::InputTag("photonsHGC"));
   desc.add<edm::InputTag>("onlineProducer", edm::InputTag("hltEgammaHLTExtra", "Unseeded", "HLT"));
   desc.add<edm::InputTag>("onlineCandidateProducer", edm::InputTag("hltEgammaCandidatesUnseeded", "", "HLT"));
-  desc.add<edm::InputTag>("onlineTracksterSrc", edm::InputTag("hltTiclCandidate", "", "HLT"));
-  desc.add<edm::InputTag>("onlineLayerClusterSrc", edm::InputTag("hltMergeLayerClusters", "", "HLT"));
-  desc.add<edm::InputTag>("onlineTimeLayerClusterSrc", edm::InputTag("hltMergeLayerClusters", "timeLayerCluster", "HLT"));
+  desc.add<edm::InputTag>("onlineTracksterSrc", edm::InputTag("ticlTrackstersMerge", "", "HLT"));
+  desc.add<edm::InputTag>("onlineLayerClusterSrc", edm::InputTag("hgcalMergeLayerClusters", "", "HLT"));
+  desc.add<edm::InputTag>("onlineTimeLayerClusterSrc", edm::InputTag("hgcalMergeLayerClusters", "timeLayerCluster", "HLT"));
   desc.add<edm::InputTag>("onlineRecHitsEE_Src", edm::InputTag("hltHGCalRecHit", "HGCEERecHits", "HLT"));
   desc.add<edm::InputTag>("onlineRecHitsFH_Src", edm::InputTag("hltHGCalRecHit", "HGCHEFRecHits", "HLT"));
   desc.add<edm::InputTag>("onlineRecHitsBH_Src", edm::InputTag("hltHGCalRecHit", "HGCHEBRecHits", "HLT"));
@@ -1031,6 +1053,7 @@ void PhotonComparisonNtuplizer::fillDescriptions(edm::ConfigurationDescriptions&
   desc.add<double>("extRadius", 0.3);
   desc.add<double>("gen_deltaR", 0.1);
   desc.add<bool>("isMC", true);
+  desc.add<bool>("propagateHGCalTimingToOrigin", false);
   descriptions.add("photonComparisonNtuplizer", desc);
 }
 

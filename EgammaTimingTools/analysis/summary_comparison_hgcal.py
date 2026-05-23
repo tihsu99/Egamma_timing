@@ -36,10 +36,23 @@ def check_dir(path):
     os.system("mkdir -p {}".format(path))
 
 
+def parquet_sources(iso_dir, particle, region, scenario, process_name):
+  single_file = os.path.join(iso_dir, particle, region, scenario, f"{process_name}_iso.parquet")
+  if os.path.exists(single_file):
+    return [single_file]
+  part_pattern = os.path.join(iso_dir, particle, region, scenario, f"{process_name}_iso_parts", "*.parquet")
+  part_files = sorted(glob.glob(part_pattern))
+  if part_files:
+    return part_files
+  raise RuntimeError("No parquet sources found for scenario={} process={}".format(scenario, process_name))
+
+
 def load_frame(iso_dir, particle, region, scenario, process_name):
-  file_name = os.path.join(iso_dir, particle, region, scenario, f"{process_name}_iso.parquet")
-  print("[load] {}".format(file_name))
-  return pd.read_parquet(file_name)
+  sources = parquet_sources(iso_dir, particle, region, scenario, process_name)
+  print("[load] {} parquet file(s) for scenario={} process={}".format(len(sources), scenario, process_name))
+  if len(sources) == 1:
+    return pd.read_parquet(sources[0])
+  return pd.concat((pd.read_parquet(source) for source in sources), ignore_index=True, copy=False)
 
 
 def load_scenario_frames(iso_dir, particle, region, scenario, signal_process, background_process):
@@ -391,7 +404,8 @@ def timing_plot_bins(variable, scenario_payload, valid_scenarios, signal_process
   return np.linspace(low, high, 70)
 
 
-def plot_timing_distributions(merged_dir, signal_merged_file, background_merged_file, particle, region, signal_process, background_process, plotdir, n_workers=1):
+def plot_timing_distributions(merged_dir, signal_merged_file, background_merged_file, particle, region, signal_process, background_process, plotdir, n_workers=1, scenarios=None):
+  scenarios = scenarios if scenarios else SCENARIOS
   common_variables = [
       "SeedTime",
       "SeedMultiplicity",
@@ -429,7 +443,7 @@ def plot_timing_distributions(merged_dir, signal_merged_file, background_merged_
 
   scenario_payload = {}
   if n_workers <= 1:
-    for scenario in SCENARIOS:
+    for scenario in scenarios:
       key, payload = load_timing_payload_for_scenario(
           merged_dir, signal_merged_file, background_merged_file,
           particle, region, signal_process, background_process, scenario,
@@ -449,7 +463,7 @@ def plot_timing_distributions(merged_dir, signal_merged_file, background_merged_
               background_process,
               scenario,
           ): scenario
-          for scenario in SCENARIOS
+          for scenario in scenarios
       }
       future_iter = as_completed(futures)
       if tqdm is not None:
@@ -463,7 +477,7 @@ def plot_timing_distributions(merged_dir, signal_merged_file, background_merged_
     variable_iter = tqdm(variable_iter, desc="Timing plots", unit="plot")
   for variable in variable_iter:
     valid_scenarios = []
-    for scenario in SCENARIOS:
+    for scenario in scenarios:
       if (
           variable in scenario_payload[scenario].get(signal_process, {}) or
           variable in scenario_payload[scenario].get(background_process, {})
@@ -515,6 +529,7 @@ def main():
   parser.add_argument("--region", required=True, type=str)
   parser.add_argument("--signal", required=True, type=str)
   parser.add_argument("--background", required=True, type=str)
+  parser.add_argument("--scenario", action="append", choices=SCENARIOS, help="Optional scenario filter")
   parser.add_argument("--n-workers", default=1, type=int)
   args = parser.parse_args()
 
@@ -524,11 +539,12 @@ def main():
 
   check_dir(args.plotDir)
 
+  scenarios = args.scenario if args.scenario else SCENARIOS
   frames = {}
   if args.n_workers <= 1:
-    scenario_iter = SCENARIOS
+    scenario_iter = scenarios
     if tqdm is not None:
-      scenario_iter = tqdm(SCENARIOS, desc="Loading scenarios", unit="scenario")
+      scenario_iter = tqdm(scenarios, desc="Loading scenarios", unit="scenario")
     for scenario in scenario_iter:
       key, frame = load_scenario_frames(args.isoDir, args.particle, args.region, scenario, args.signal, args.background)
       frames[key] = frame
@@ -536,7 +552,7 @@ def main():
     with ThreadPoolExecutor(max_workers=args.n_workers) as executor:
       futures = {
           executor.submit(load_scenario_frames, args.isoDir, args.particle, args.region, scenario, args.signal, args.background): scenario
-          for scenario in SCENARIOS
+          for scenario in scenarios
       }
       future_iter = as_completed(futures)
       if tqdm is not None:
@@ -559,19 +575,19 @@ def main():
   online_iter = ["cone", "seed", "cluster"]
   if tqdm is not None:
     online_iter = tqdm(online_iter, desc="Online layerCluster ROC", unit="scan")
+  online_frames = {scenario: frames[scenario] for scenario in scenarios if scenario in ONLINE_SCENARIOS and scenario in frames}
   for veto_mode in online_iter:
     key = f"layerCluster_{veto_mode}_seed"
     summary[key] = plot_roc_by_scenario(
-        {scenario: frames[scenario] for scenario in SCENARIOS if scenario in ONLINE_SCENARIOS},
+        online_frames,
         "layerCluster",
         veto_mode,
         "seed",
         args.plotDir,
     )
-    plot_auc_scan({scenario: frames[scenario] for scenario in SCENARIOS if scenario in ONLINE_SCENARIOS}, "layerCluster", veto_mode, "seed", args.plotDir)
+    plot_auc_scan(online_frames, "layerCluster", veto_mode, "seed", args.plotDir)
     print("[roc] layerCluster {} ref=seed".format(veto_mode))
 
-  online_frames = {scenario: frames[scenario] for scenario in SCENARIOS if scenario in ONLINE_SCENARIOS}
   online_layer_seed_tasks = [
       (collection_name, veto_mode)
       for collection_name in ["trackster", "HGCRecHit", "layerCluster"]
@@ -615,7 +631,7 @@ def main():
     plot_auc_scan(online_frames, collection_name, veto_mode, reference_name, args.plotDir)
     print("[roc] {} {} ref={}".format(collection_name, veto_mode, reference_name))
 
-  offline_frames = {scenario: frames[scenario] for scenario in SCENARIOS if scenario in OFFLINE_SCENARIOS}
+  offline_frames = {scenario: frames[scenario] for scenario in scenarios if scenario in OFFLINE_SCENARIOS and scenario in frames}
   offline_tasks = [
       (reference_name, collection_name, veto_mode)
       for reference_name in OFFLINE_ONLY_REFERENCES
@@ -647,6 +663,7 @@ def main():
       args.background,
       args.plotDir,
       args.n_workers,
+      scenarios,
   )
 
 

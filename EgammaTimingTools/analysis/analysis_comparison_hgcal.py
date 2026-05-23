@@ -3,6 +3,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import glob
 import os
+import shutil
 
 import awkward as ak
 import numpy as np
@@ -51,6 +52,10 @@ def resolve_input_files(input_dir, input_file, particle, region, process_name):
   return scenario_files(input_dir, particle, region, process_name)
 
 
+def tree_sources(files, tree_name):
+  return [f"{name}:{tree_name}" for name in files]
+
+
 def read_tree(files, tree_name):
   if not files:
     raise RuntimeError("No ROOT files found for tree {}".format(tree_name))
@@ -58,7 +63,29 @@ def read_tree(files, tree_name):
   try:
     if len(files) == 1:
       return uproot.open(files[0])[tree_name].arrays(library="ak")
-    return uproot.concatenate([f"{name}:{tree_name}" for name in files], library="ak")
+    return uproot.concatenate(tree_sources(files, tree_name), library="ak")
+  except ValueError as exc:
+    message = str(exc)
+    if "entries in normal baskets" in message and "don't add up to expected number of entries" in message:
+      raise RuntimeError(
+          "The input ROOT file looks inconsistent for uproot reading, likely from `hadd` over uproot-written jagged TTrees. "
+          "Use the original merged file directory instead of the hadd output, or pass non-hadded per-process files."
+      ) from exc
+    raise
+
+
+def iterate_tree(files, tree_name, branches, step_size):
+  if not files:
+    raise RuntimeError("No ROOT files found for tree {}".format(tree_name))
+  print("[read] tree={} files={} step_size={}".format(tree_name, len(files), step_size))
+  try:
+    yield from uproot.iterate(
+        tree_sources(files, tree_name),
+        expressions=branches,
+        step_size=step_size,
+        library="ak",
+        how=dict,
+    )
   except ValueError as exc:
     message = str(exc)
     if "entries in normal baskets" in message and "don't add up to expected number of entries" in message:
@@ -121,6 +148,56 @@ def flatten_valid(values, mask=None):
   if mask is None:
     return ak.to_numpy(ak.flatten(values))
   return ak.to_numpy(ak.flatten(values[mask]))
+
+
+def scenario_branch_names(scenario, particle):
+  prefix, matched_branch = object_prefix(particle)
+  branches = {
+      f"{prefix}_pt",
+      f"{prefix}_eta",
+      f"{prefix}_phi",
+      matched_branch,
+      "genIdx",
+      "Trackster_pt",
+      "Trackster_dr",
+      "Trackster_Time",
+      "Trackster_isSeed",
+      "Trackster_inCluster",
+      "HGCRecHit_dr",
+      "HGCRecHit_energy",
+      "HGCRecHit_Time",
+      "HGCRecHit_isSeed",
+      "HGCRecHit_inCluster",
+  }
+
+  if scenario in ONLINE_SCENARIOS:
+    branches.update({
+        "hgcalPFIsol_default",
+        "ecalPFIsol_default",
+        "hcalPFIsol_default",
+        "r9_default",
+        "sigmaIEtaIEta_default",
+        "hForHoverE_default",
+        "trkIsol_default",
+        "trkIsolV0_default",
+        "trkIsolV6_default",
+        "trkIsolV72_default",
+        "LayerCluster_dr",
+        "LayerCluster_energy",
+        "LayerCluster_Time",
+        "LayerCluster_isSeed",
+        "LayerCluster_inCluster",
+    })
+
+  if scenario in OFFLINE_SCENARIOS:
+    branches.update({
+        "PV_Time",
+        "sigTrkTime",
+        "sigTrkTimeErr",
+        "sigTrkMtdMva",
+    })
+
+  return sorted(branches)
 
 
 def scenario_collections(events, scenario, particle):
@@ -334,17 +411,43 @@ def build_dataframe(events, scenario, particle, process_name, is_signal):
   return df
 
 
-def write_scenario_parquet(input_dir, input_file, out_dir, particle, region, scenario, process_name, is_signal):
+def clear_existing_parquet_parts(scenario_dir, process_name):
+  part_dir = os.path.join(scenario_dir, f"{process_name}_iso_parts")
+  single_file = os.path.join(scenario_dir, f"{process_name}_iso.parquet")
+  if os.path.isdir(part_dir):
+    shutil.rmtree(part_dir)
+  if os.path.exists(single_file):
+    os.remove(single_file)
+  os.makedirs(part_dir, exist_ok=True)
+  return part_dir
+
+
+def write_scenario_parquet(input_dir, input_file, out_dir, particle, region, scenario, process_name, is_signal, step_size):
   files = resolve_input_files(input_dir, input_file, particle, region, process_name)
   print("[build] scenario={} process={} signal={}".format(scenario, process_name, is_signal))
-  events = read_tree(files, scenario)
-  df = build_dataframe(events, scenario, particle, process_name, is_signal)
   scenario_dir = os.path.join(out_dir, particle, region, scenario)
   check_dir(scenario_dir)
-  out_path = os.path.join(scenario_dir, f"{process_name}_iso.parquet")
-  df.to_parquet(out_path, index=False)
-  print("[saved] {} entries={}".format(out_path, len(df)))
-  return out_path
+  part_dir = clear_existing_parquet_parts(scenario_dir, process_name)
+  branches = scenario_branch_names(scenario, particle)
+  total_entries = 0
+  n_parts = 0
+  for chunk in iterate_tree(files, scenario, branches, step_size):
+    events = ak.Array(chunk)
+    df = build_dataframe(events, scenario, particle, process_name, is_signal)
+    if df.empty:
+      continue
+    out_path = os.path.join(part_dir, f"{process_name}_iso.part{n_parts:04d}.parquet")
+    df.to_parquet(out_path, index=False)
+    total_entries += len(df)
+    n_parts += 1
+    print("[saved] {} entries={}".format(out_path, len(df)))
+  if n_parts == 0:
+    out_path = os.path.join(part_dir, f"{process_name}_iso.part0000.parquet")
+    pd.DataFrame(columns=["process", "is_signal", "weight", "scenario"]).to_parquet(out_path, index=False)
+    n_parts = 1
+    print("[saved] {} entries=0".format(out_path))
+  print("[done] scenario={} process={} parts={} total_entries={}".format(scenario, process_name, n_parts, total_entries))
+  return part_dir
 
 
 def main():
@@ -360,6 +463,7 @@ def main():
   parser.add_argument("--background", required=True, type=str)
   parser.add_argument("--scenario", action="append", choices=SCENARIOS, help="Optional scenario filter")
   parser.add_argument("--n-workers", default=1, type=int)
+  parser.add_argument("--step-size", default="40 MB", type=str, help="uproot iterate step size")
   args = parser.parse_args()
 
   if not args.inputDir and not args.inputFile:
@@ -380,7 +484,17 @@ def main():
     if tqdm is not None:
       task_iter = tqdm(tasks, desc="Scenario/process tasks", unit="task")
     for scenario, process_name, is_signal, input_file in task_iter:
-      write_scenario_parquet(args.inputDir, input_file, args.outDir, args.particle, args.region, scenario, process_name, is_signal)
+      write_scenario_parquet(
+          args.inputDir,
+          input_file,
+          args.outDir,
+          args.particle,
+          args.region,
+          scenario,
+          process_name,
+          is_signal,
+          args.step_size,
+      )
   else:
     with ThreadPoolExecutor(max_workers=args.n_workers) as executor:
       futures = {
@@ -394,6 +508,7 @@ def main():
               scenario,
               process_name,
               is_signal,
+              args.step_size,
           ): (scenario, process_name)
           for scenario, process_name, is_signal, input_file in tasks
       }

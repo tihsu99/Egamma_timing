@@ -14,6 +14,8 @@
 
 namespace egammaTiming {
 
+constexpr double kLightSpeedCmPerNs = 29.9792458;
+
 struct GenMatchResult {
   int index = -1;
   double dr = 999.;
@@ -43,6 +45,14 @@ inline float getEgammaVar(const trigger::EgammaObject& object, const std::string
   int missing = 0;
   const float value = object.var(key, missing);
   return missing ? fallback : value;
+}
+
+inline double timeAtOrigin(double time, double x, double y, double z) {
+  if (time < -90.) {
+    return time;
+  }
+  const double pathLength = std::sqrt(x * x + y * y + z * z);
+  return time - pathLength / kLightSpeedCmPerNs;
 }
 
 template <typename HitCollectionA, typename HitCollectionB>
