@@ -28,6 +28,25 @@ COLLECTIONS = [
     ("trackster", "pt", 1.0),
     ("layerCluster", "energy", 0.0),
 ]
+LAYERCLUSTER_BRANCHES = {
+    "LayerCluster_dr",
+    "LayerCluster_energy",
+    "LayerCluster_Time",
+    "LayerCluster_isSeed",
+    "LayerCluster_inCluster",
+}
+ONLINE_OPTIONAL_BRANCHES = {
+    "hgcalPFIsol_default",
+    "ecalPFIsol_default",
+    "hcalPFIsol_default",
+    "r9_default",
+    "sigmaIEtaIEta_default",
+    "hForHoverE_default",
+    "trkIsol_default",
+    "trkIsolV0_default",
+    "trkIsolV6_default",
+    "trkIsolV72_default",
+} | LAYERCLUSTER_BRANCHES
 
 
 def check_dir(path):
@@ -54,6 +73,48 @@ def resolve_input_files(input_dir, input_file, particle, region, process_name):
 
 def tree_sources(files, tree_name):
   return [f"{name}:{tree_name}" for name in files]
+
+
+def tree_branch_names(file_name, tree_name):
+  with uproot.open(file_name) as root_file:
+    if tree_name not in root_file:
+      raise KeyError("Unable to find tree '{}' in {}".format(tree_name, file_name))
+    return set(root_file[tree_name].keys())
+
+
+def optional_branch_names(scenario):
+  if scenario in ONLINE_SCENARIOS:
+    return ONLINE_OPTIONAL_BRANCHES
+  return set()
+
+
+def filter_available_branches(files, tree_name, branches, optional_branches):
+  if not files:
+    raise RuntimeError("No ROOT files found for tree {}".format(tree_name))
+
+  available = tree_branch_names(files[0], tree_name)
+  requested = set(branches)
+  missing = requested - available
+  missing_required = missing - optional_branches
+  if missing_required:
+    raise KeyError(
+        "Missing required branches in tree '{}' from {}: {}".format(
+            tree_name,
+            files[0],
+            ", ".join(sorted(missing_required)),
+        )
+    )
+
+  missing_optional = missing & optional_branches
+  if missing_optional:
+    print(
+        "[read] tree={} skipping missing optional branches: {}".format(
+            tree_name,
+            ", ".join(sorted(missing_optional)),
+        )
+    )
+
+  return sorted(requested & available)
 
 
 def read_tree(files, tree_name):
@@ -248,7 +309,7 @@ def scenario_collections(events, scenario, particle):
       },
   }
 
-  if scenario in ONLINE_SCENARIOS and "LayerCluster_Time" in events.fields:
+  if scenario in ONLINE_SCENARIOS and LAYERCLUSTER_BRANCHES.issubset(events.fields):
     collections["layerCluster"] = {
         "dr": events["LayerCluster_dr"],
         "value": events["LayerCluster_energy"],
@@ -429,6 +490,7 @@ def write_scenario_parquet(input_dir, input_file, out_dir, particle, region, sce
   check_dir(scenario_dir)
   part_dir = clear_existing_parquet_parts(scenario_dir, process_name)
   branches = scenario_branch_names(scenario, particle)
+  branches = filter_available_branches(files, scenario, branches, optional_branch_names(scenario))
   total_entries = 0
   n_parts = 0
   for chunk in iterate_tree(files, scenario, branches, step_size):
