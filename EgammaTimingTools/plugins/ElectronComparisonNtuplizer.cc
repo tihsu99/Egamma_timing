@@ -4,6 +4,7 @@
 #include "DataFormats/BeamSpot/interface/BeamSpot.h"
 #include "DataFormats/CaloRecHit/interface/CaloClusterFwd.h"
 #include "DataFormats/Common/interface/ValueMap.h"
+#include "DataFormats/EgammaReco/interface/SuperCluster.h"
 #include "DataFormats/EgammaCandidates/interface/GsfElectron.h"
 #include "DataFormats/RecoCandidate/interface/RecoEcalCandidate.h"
 #include "DataFormats/GsfTrackReco/interface/GsfTrack.h"
@@ -181,6 +182,14 @@ private:
   std::vector<bool> online_LayerCluster_isSeed_;
   std::vector<bool> online_LayerCluster_inCluster_;
 
+  std::vector<double> online_SuperCluster_energy_;
+  std::vector<double> online_SuperCluster_rawEnergy_;
+  std::vector<double> online_SuperCluster_eta_;
+  std::vector<double> online_SuperCluster_phi_;
+  std::vector<double> online_SuperCluster_dr_;
+  std::vector<int> online_SuperCluster_nClusters_;
+  std::vector<bool> online_SuperCluster_isCandidate_;
+
   std::vector<double> online_RecHit_dr_;
   std::vector<double> online_RecHit_eta_;
   std::vector<double> online_RecHit_phi_;
@@ -219,6 +228,7 @@ private:
   edm::EDGetTokenT<std::vector<ticl::Trackster>> onlineTracksterToken_;
   edm::EDGetTokenT<std::vector<reco::CaloCluster>> onlineLayerClusterToken_;
   const edm::EDGetTokenT<edm::ValueMap<std::pair<float, float>>> onlineLayerClusterTimeToken_;
+  edm::EDGetTokenT<std::vector<reco::SuperCluster>> onlineSuperClusterToken_;
   const edm::EDGetTokenT<HGCRecHitCollection> onlineHitsEE_;
   const edm::EDGetTokenT<HGCRecHitCollection> onlineHitsFH_;
   const edm::EDGetTokenT<HGCRecHitCollection> onlineHitsBH_;
@@ -264,6 +274,7 @@ ElectronComparisonNtuplizer::ElectronComparisonNtuplizer(const edm::ParameterSet
       onlineTracksterToken_{consumes(config.getParameter<edm::InputTag>("onlineTracksterSrc"))},
       onlineLayerClusterToken_{consumes(config.getParameter<edm::InputTag>("onlineLayerClusterSrc"))},
       onlineLayerClusterTimeToken_{consumes(config.getParameter<edm::InputTag>("onlineTimeLayerClusterSrc"))},
+      onlineSuperClusterToken_{consumes(config.getParameter<edm::InputTag>("onlineSuperClusterSrc"))},
       onlineHitsEE_{consumes(config.getParameter<edm::InputTag>("onlineRecHitsEE_Src"))},
       onlineHitsFH_{consumes(config.getParameter<edm::InputTag>("onlineRecHitsFH_Src"))},
       onlineHitsBH_{consumes(config.getParameter<edm::InputTag>("onlineRecHitsBH_Src"))},
@@ -389,6 +400,13 @@ ElectronComparisonNtuplizer::ElectronComparisonNtuplizer(const edm::ParameterSet
   onlineTree_->Branch("LayerCluster_TimeErr", &online_LayerCluster_TimeErr_);
   onlineTree_->Branch("LayerCluster_isSeed", &online_LayerCluster_isSeed_);
   onlineTree_->Branch("LayerCluster_inCluster", &online_LayerCluster_inCluster_);
+  onlineTree_->Branch("SuperCluster_dr", &online_SuperCluster_dr_);
+  onlineTree_->Branch("SuperCluster_energy", &online_SuperCluster_energy_);
+  onlineTree_->Branch("SuperCluster_rawEnergy", &online_SuperCluster_rawEnergy_);
+  onlineTree_->Branch("SuperCluster_eta", &online_SuperCluster_eta_);
+  onlineTree_->Branch("SuperCluster_phi", &online_SuperCluster_phi_);
+  onlineTree_->Branch("SuperCluster_nClusters", &online_SuperCluster_nClusters_);
+  onlineTree_->Branch("SuperCluster_isCandidate", &online_SuperCluster_isCandidate_);
   onlineTree_->Branch("HGCRecHit_dr", &online_RecHit_dr_);
   onlineTree_->Branch("HGCRecHit_eta", &online_RecHit_eta_);
   onlineTree_->Branch("HGCRecHit_phi", &online_RecHit_phi_);
@@ -497,6 +515,13 @@ void ElectronComparisonNtuplizer::resetOnlineVectors() {
   online_LayerCluster_TimeErr_.clear();
   online_LayerCluster_isSeed_.clear();
   online_LayerCluster_inCluster_.clear();
+  online_SuperCluster_energy_.clear();
+  online_SuperCluster_rawEnergy_.clear();
+  online_SuperCluster_eta_.clear();
+  online_SuperCluster_phi_.clear();
+  online_SuperCluster_dr_.clear();
+  online_SuperCluster_nClusters_.clear();
+  online_SuperCluster_isCandidate_.clear();
   online_RecHit_dr_.clear();
   online_RecHit_eta_.clear();
   online_RecHit_phi_.clear();
@@ -655,6 +680,11 @@ void ElectronComparisonNtuplizer::analyze(const edm::Event& iEvent, const edm::E
   edm::Handle<edm::ValueMap<std::pair<float, float>>> onlineLayerClusterTimeHandle;
   iEvent.getByToken(onlineLayerClusterTimeToken_, onlineLayerClusterTimeHandle);
   requireValidHandle(onlineLayerClusterTimeHandle, "onlineTimeLayerClusterSrc");
+
+  edm::Handle<std::vector<reco::SuperCluster>> onlineSuperClusterHandle;
+  iEvent.getByToken(onlineSuperClusterToken_, onlineSuperClusterHandle);
+  requireValidHandle(onlineSuperClusterHandle, "onlineSuperClusterSrc");
+  const std::vector<reco::SuperCluster>* onlineSuperClusters = onlineSuperClusterHandle.product();
 
   const std::vector<reco::Vertex> vertices = *vertexHandle;
   reco::Vertex primaryVertex = egammaTiming::getPrimaryVertex(vertices, vtxN_);
@@ -966,6 +996,36 @@ void ElectronComparisonNtuplizer::analyze(const edm::Event& iEvent, const edm::E
         const auto& seedHitsAndFractions = hgcalSC.seed()->hitsAndFractions();
         const auto& egClusters = hgcalSC.clusters();
 
+        for (const auto& superCluster : *onlineSuperClusters) {
+          const double superClusterDr = reco::deltaR(online_eta_, online_phi_, superCluster.eta(), superCluster.phi());
+          if (superClusterDr >= extRadius_) {
+            continue;
+          }
+
+          bool isCandidateSuperCluster = false;
+          if (superCluster.seed().isNonnull()) {
+            isCandidateSuperCluster = egammaTiming::haveCommonHit(superCluster.seed()->hitsAndFractions(), seedHitsAndFractions);
+          }
+          for (auto clusterIt = superCluster.clusters().begin();
+               clusterIt != superCluster.clusters().end() && !isCandidateSuperCluster;
+               ++clusterIt) {
+            for (const auto& egCluster : egClusters) {
+              if (egammaTiming::haveCommonHit((*clusterIt)->hitsAndFractions(), egCluster->hitsAndFractions())) {
+                isCandidateSuperCluster = true;
+                break;
+              }
+            }
+          }
+
+          online_SuperCluster_dr_.push_back(superClusterDr);
+          online_SuperCluster_energy_.push_back(superCluster.energy());
+          online_SuperCluster_rawEnergy_.push_back(superCluster.rawEnergy());
+          online_SuperCluster_eta_.push_back(superCluster.eta());
+          online_SuperCluster_phi_.push_back(superCluster.phi());
+          online_SuperCluster_nClusters_.push_back(static_cast<int>(superCluster.clusters().size()));
+          online_SuperCluster_isCandidate_.push_back(isCandidateSuperCluster);
+        }
+
         std::vector<bool> layerClusterIsSeed(onlineLayerClusters->size(), false);
         std::vector<bool> layerClusterInCluster(onlineLayerClusters->size(), false);
 
@@ -1108,6 +1168,7 @@ void ElectronComparisonNtuplizer::fillDescriptions(edm::ConfigurationDescription
   desc.add<edm::InputTag>("onlineTracksterSrc", edm::InputTag("ticlTrackstersMerge", "", "HLT"));
   desc.add<edm::InputTag>("onlineLayerClusterSrc", edm::InputTag("hgcalMergeLayerClusters", "", "HLT"));
   desc.add<edm::InputTag>("onlineTimeLayerClusterSrc", edm::InputTag("hgcalMergeLayerClusters", "timeLayerCluster", "HLT"));
+  desc.add<edm::InputTag>("onlineSuperClusterSrc", edm::InputTag("hltParticleFlowSuperClusterHGCalFromTICLUnseeded", "", "HLTX"));
   desc.add<edm::InputTag>("onlineRecHitsEE_Src", edm::InputTag("hltHGCalRecHit", "HGCEERecHits", "HLT"));
   desc.add<edm::InputTag>("onlineRecHitsFH_Src", edm::InputTag("hltHGCalRecHit", "HGCHEFRecHits", "HLT"));
   desc.add<edm::InputTag>("onlineRecHitsBH_Src", edm::InputTag("hltHGCalRecHit", "HGCHEBRecHits", "HLT"));

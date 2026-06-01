@@ -22,6 +22,7 @@ options.register("onlineCandidateLabel", "hltEgammaCandidatesUnseeded::HLTX", Va
 options.register("onlineTracksterLabel", "hltTiclCandidate::HLTX", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "Online HLT trackster collection")
 options.register("onlineLayerClusterLabel", "hltMergeLayerClusters::HLTX", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "Online HLT layer cluster collection")
 options.register("onlineTimeLayerClusterLabel", "hltMergeLayerClusters:timeLayerCluster:HLTX", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "Online HLT layer cluster timing ValueMap")
+options.register("onlineSuperClusterLabel", "hltParticleFlowSuperClusterHGCalFromTICLUnseeded::HLTX", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "Online HLT HGCal supercluster collection")
 options.register("offlineTracksterLabel", "", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "Offline trackster collection")
 options.register("propagateHGCalTimingToOrigin", 0, VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.int, "Propagate HGCal timing to the interaction origin")
 options.register("outDir", "", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "Output directory")
@@ -71,6 +72,7 @@ process.ntuplizer = cms.EDAnalyzer(
     onlineTracksterSrc=cms.InputTag(*options.onlineTracksterLabel.split(":")),
     onlineLayerClusterSrc=cms.InputTag(*options.onlineLayerClusterLabel.split(":")),
     onlineTimeLayerClusterSrc=cms.InputTag(*options.onlineTimeLayerClusterLabel.split(":")),
+    onlineSuperClusterSrc=cms.InputTag(*options.onlineSuperClusterLabel.split(":")),
     onlineRecHitsEE_Src=cms.InputTag("hltHGCalRecHit", "HGCEERecHits", "HLTX"),
     onlineRecHitsFH_Src=cms.InputTag("hltHGCalRecHit", "HGCHEFRecHits", "HLTX"),
     onlineRecHitsBH_Src=cms.InputTag("hltHGCalRecHit", "HGCHEBRecHits", "HLTX"),

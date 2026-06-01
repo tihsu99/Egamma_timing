@@ -342,6 +342,23 @@ def timing_arrays(events, scenario):
     arrays["HGCRecHit_TimeWrtLayerClusterCluster"] = ak.flatten(
         abs(events["HGCRecHit_Time"] - ak.broadcast_arrays(layercluster_cluster_time, events["HGCRecHit_Time"])[0])
     )
+  if scenario in ONLINE_SCENARIOS and "SuperCluster_energy" in events.fields:
+    supercluster_mask = (
+        (events["SuperCluster_energy"] > 0.0) &
+        (events["SuperCluster_dr"] < 0.3)
+    )
+    arrays["SuperCluster_energy"] = ak.flatten(events["SuperCluster_energy"][supercluster_mask])
+    arrays["SuperCluster_rawEnergy"] = ak.flatten(events["SuperCluster_rawEnergy"][supercluster_mask])
+    arrays["SuperCluster_eta"] = ak.flatten(events["SuperCluster_eta"][supercluster_mask])
+    arrays["SuperCluster_phi"] = ak.flatten(events["SuperCluster_phi"][supercluster_mask])
+    arrays["SuperCluster_dr"] = ak.flatten(events["SuperCluster_dr"][supercluster_mask])
+    arrays["SuperCluster_nClusters"] = ak.flatten(events["SuperCluster_nClusters"][supercluster_mask])
+    arrays["SuperClusterMultiplicity"] = ak.sum(supercluster_mask, axis=1)
+    candidate_mask = supercluster_mask & events["SuperCluster_isCandidate"]
+    arrays["SuperClusterCandidateEnergy"] = ak.flatten(events["SuperCluster_energy"][candidate_mask])
+    arrays["SuperClusterCandidateRawEnergy"] = ak.flatten(events["SuperCluster_rawEnergy"][candidate_mask])
+    arrays["SuperClusterCandidateNClusters"] = ak.flatten(events["SuperCluster_nClusters"][candidate_mask])
+    arrays["SuperClusterCandidateMultiplicity"] = ak.sum(candidate_mask, axis=1)
   if scenario in OFFLINE_SCENARIOS:
     arrays["Track_TimeWrtPV"] = ak.flatten(abs(events["Track_Time"] - ak.broadcast_arrays(events["PV_Time"], events["Track_Time"])[0]))
     arrays["Trackster_TimeWrtPV"] = ak.flatten(abs(events["Trackster_Time"] - ak.broadcast_arrays(events["PV_Time"], events["Trackster_Time"])[0]))
@@ -349,7 +366,18 @@ def timing_arrays(events, scenario):
     arrays["Track_TimeWrtSigTrk"] = ak.flatten(abs(events["Track_Time"] - ak.broadcast_arrays(events["sigTrkTime"], events["Track_Time"])[0]))
     arrays["Trackster_TimeWrtSigTrk"] = ak.flatten(abs(events["Trackster_Time"] - ak.broadcast_arrays(events["sigTrkTime"], events["Trackster_Time"])[0]))
     arrays["HGCRecHit_TimeWrtSigTrk"] = ak.flatten(abs(events["HGCRecHit_Time"] - ak.broadcast_arrays(events["sigTrkTime"], events["HGCRecHit_Time"])[0]))
-  return {name: ak.to_numpy(values[(values > -90) & (values < 900)]) for name, values in arrays.items()}
+  clean_arrays = {}
+  for name, values in arrays.items():
+    values = ak.to_numpy(values)
+    mask = np.isfinite(values)
+    if "Time" in name or "Wrt" in name:
+      mask = mask & (values > -90) & (values < 900)
+    elif "Multiplicity" in name or name.endswith("nClusters") or name.endswith("NClusters"):
+      mask = mask & (values >= 0) & (values < 900)
+    else:
+      mask = mask & (values > -90)
+    clean_arrays[name] = values[mask]
+  return clean_arrays
 
 
 def load_timing_payload_for_scenario(merged_dir, signal_merged_file, background_merged_file, particle, region, signal_process, background_process, scenario):
@@ -385,7 +413,7 @@ def timing_plot_bins(variable, scenario_payload, valid_scenarios, signal_process
   if combined.size == 0:
     return None
 
-  if variable in {"SeedMultiplicity", "LayerClusterSeedMultiplicity", "TracksterClusterMultiplicity", "LayerClusterClusterMultiplicity"}:
+  if variable in {"SeedMultiplicity", "LayerClusterSeedMultiplicity", "TracksterClusterMultiplicity", "LayerClusterClusterMultiplicity", "SuperClusterMultiplicity", "SuperClusterCandidateMultiplicity"} or variable.endswith("nClusters") or variable.endswith("NClusters"):
     upper = int(np.ceil(np.quantile(combined, 0.99)))
     upper = max(upper, 1)
     return np.arange(-0.5, upper + 1.5, 1.0)
@@ -431,6 +459,17 @@ def plot_timing_distributions(merged_dir, signal_merged_file, background_merged_
       "Trackster_TimeWrtLayerClusterCluster",
       "LayerCluster_TimeWrtLayerClusterCluster",
       "HGCRecHit_TimeWrtLayerClusterCluster",
+      "SuperCluster_energy",
+      "SuperCluster_rawEnergy",
+      "SuperCluster_eta",
+      "SuperCluster_phi",
+      "SuperCluster_dr",
+      "SuperCluster_nClusters",
+      "SuperClusterMultiplicity",
+      "SuperClusterCandidateEnergy",
+      "SuperClusterCandidateRawEnergy",
+      "SuperClusterCandidateNClusters",
+      "SuperClusterCandidateMultiplicity",
   ]
   offline_only = [
       "Track_TimeWrtPV",

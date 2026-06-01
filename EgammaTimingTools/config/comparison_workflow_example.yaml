@@ -11,10 +11,11 @@ variants:
     # Use the rerun HLT HGCal products for the HGCal timing comparison.
     proc_modifier: ""
     online_candidate_label: hltEgammaCandidatesUnseeded::HLTX
-    online_trackster_label: hltTiclCandidate::HLTX
+    online_trackster_label: hltTiclTrackstersMerge::HLTX
     online_layer_cluster_label: hltMergeLayerClusters::HLTX
     online_time_layer_cluster_label: hltMergeLayerClusters:timeLayerCluster:HLTX
-    offline_trackster_label: ticlCandidate::reRECO
+    online_supercluster_label: hltParticleFlowSuperClusterHGCalFromTICLUnseeded::HLTX
+    offline_trackster_label: ticlTrackstersMerge::reRECO
     propagate_hgcal_timing_to_origin: false
   v5:
     # TICL v5 stores HGCal timing at the detector; propagate it back to the
@@ -24,6 +25,7 @@ variants:
     online_trackster_label: hltTiclCandidate::HLTX
     online_layer_cluster_label: hltMergeLayerClusters::HLTX
     online_time_layer_cluster_label: hltMergeLayerClusters:timeLayerCluster:HLTX
+    online_supercluster_label: hltParticleFlowSuperClusterHGCalFromTICLUnseeded::HLTX
     offline_trackster_label: ticlCandidate::reRECO
     propagate_hgcal_timing_to_origin: true
 
