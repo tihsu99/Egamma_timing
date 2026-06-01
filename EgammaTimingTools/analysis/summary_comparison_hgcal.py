@@ -342,7 +342,7 @@ def timing_arrays(events, scenario):
     arrays["HGCRecHit_TimeWrtLayerClusterCluster"] = ak.flatten(
         abs(events["HGCRecHit_Time"] - ak.broadcast_arrays(layercluster_cluster_time, events["HGCRecHit_Time"])[0])
     )
-  if scenario in ONLINE_SCENARIOS and "SuperCluster_energy" in events.fields:
+  if "SuperCluster_energy" in events.fields:
     supercluster_mask = (
         (events["SuperCluster_energy"] > 0.0) &
         (events["SuperCluster_dr"] < 0.3)

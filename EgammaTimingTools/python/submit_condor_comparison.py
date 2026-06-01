@@ -199,6 +199,7 @@ def build_production_commands(config, args, particle, region, sample, variant, i
   online_time_layer_cluster_label = variant_cfg.get("online_time_layer_cluster_label", "hltMergeLayerClusters:timeLayerCluster:HLTX")
   online_supercluster_label = variant_cfg.get("online_supercluster_label", "hltParticleFlowSuperClusterHGCalFromTICLUnseeded::HLTX")
   offline_trackster_label = variant_cfg.get("offline_trackster_label", "ticlTrackstersMerge::reRECO")
+  offline_supercluster_label = variant_cfg.get("offline_supercluster_label", "particleFlowSuperClusterHGCal::reRECO")
   propagate_hgcal_timing = int(bool(variant_cfg.get("propagate_hgcal_timing_to_origin", False)))
   comparison_input = workflow_cfg["ntuplizer_input"]
 
@@ -223,6 +224,7 @@ def build_production_commands(config, args, particle, region, sample, variant, i
       "online_time_layer_cluster_label": online_time_layer_cluster_label,
       "online_supercluster_label": online_supercluster_label,
       "offline_trackster_label": offline_trackster_label,
+      "offline_supercluster_label": offline_supercluster_label,
       "propagate_hgcal_timing_to_origin": propagate_hgcal_timing,
       "comparison_input": comparison_input,
       "output_file": output_file,
@@ -252,7 +254,7 @@ def build_production_commands(config, args, particle, region, sample, variant, i
       "{label_arg} offlineProcess=reRECO onlineLabel={online_label} onlineCandidateLabel={online_candidate_label} "
       "onlineTracksterLabel={online_trackster_label} onlineLayerClusterLabel={online_layer_cluster_label} "
       "onlineTimeLayerClusterLabel={online_time_layer_cluster_label} onlineSuperClusterLabel={online_supercluster_label} "
-      "offlineTracksterLabel={offline_trackster_label} "
+      "offlineTracksterLabel={offline_trackster_label} offlineSuperClusterLabel={offline_supercluster_label} "
       "propagateHGCalTimingToOrigin={propagate_hgcal_timing_to_origin}".format(
           timing_dir=timing_dir,
           comparison_cfg=comparison_cfg,
@@ -266,6 +268,7 @@ def build_production_commands(config, args, particle, region, sample, variant, i
           online_time_layer_cluster_label=online_time_layer_cluster_label,
           online_supercluster_label=online_supercluster_label,
           offline_trackster_label=offline_trackster_label,
+          offline_supercluster_label=offline_supercluster_label,
           propagate_hgcal_timing_to_origin=propagate_hgcal_timing,
       )
   )

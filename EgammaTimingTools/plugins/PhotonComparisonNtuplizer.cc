@@ -136,6 +136,14 @@ private:
   std::vector<bool> RecHit_isSeeded_;
   std::vector<bool> RecHit_inCluster_;
 
+  std::vector<double> SuperCluster_energy_;
+  std::vector<double> SuperCluster_rawEnergy_;
+  std::vector<double> SuperCluster_eta_;
+  std::vector<double> SuperCluster_phi_;
+  std::vector<double> SuperCluster_dr_;
+  std::vector<int> SuperCluster_nClusters_;
+  std::vector<bool> SuperCluster_isCandidate_;
+
   int online_genIdx_;
   int online_objIdx_;
   double online_matchedToGen_;
@@ -228,6 +236,7 @@ private:
   const edm::EDGetTokenT<edm::View<reco::GenParticle>> genParticleProducer_;
   edm::EDGetTokenT<std::vector<ticl::Trackster>> tracksterToken_;
   edm::EDGetTokenT<std::vector<reco::CaloCluster>> layerClusterToken_;
+  edm::EDGetTokenT<std::vector<reco::SuperCluster>> superClusterToken_;
   const edm::EDGetTokenT<HGCRecHitCollection> hitsEE_;
   const edm::EDGetTokenT<HGCRecHitCollection> hitsFH_;
   const edm::EDGetTokenT<HGCRecHitCollection> hitsBH_;
@@ -273,6 +282,7 @@ PhotonComparisonNtuplizer::PhotonComparisonNtuplizer(const edm::ParameterSet& co
       genParticleProducer_{consumes<edm::View<reco::GenParticle>>(config.getParameter<edm::InputTag>("genParticles"))},
       tracksterToken_{consumes(config.getParameter<edm::InputTag>("tracksterSrc"))},
       layerClusterToken_{consumes(config.getParameter<edm::InputTag>("LayerClusterSrc"))},
+      superClusterToken_{consumes(config.getParameter<edm::InputTag>("superClusterSrc"))},
       hitsEE_{consumes(config.getParameter<edm::InputTag>("RecHitsEE_Src"))},
       hitsFH_{consumes(config.getParameter<edm::InputTag>("RecHitsFH_Src"))},
       hitsBH_{consumes(config.getParameter<edm::InputTag>("RecHitsBH_Src"))},
@@ -338,6 +348,13 @@ PhotonComparisonNtuplizer::PhotonComparisonNtuplizer(const edm::ParameterSet& co
   offlineTree_->Branch("Trackster_Trackpt", &Trackster_Trackpt_);
   offlineTree_->Branch("Trackster_Tracketa", &Trackster_Tracketa_);
   offlineTree_->Branch("Trackster_Trackphi", &Trackster_Trackphi_);
+  offlineTree_->Branch("SuperCluster_dr", &SuperCluster_dr_);
+  offlineTree_->Branch("SuperCluster_energy", &SuperCluster_energy_);
+  offlineTree_->Branch("SuperCluster_rawEnergy", &SuperCluster_rawEnergy_);
+  offlineTree_->Branch("SuperCluster_eta", &SuperCluster_eta_);
+  offlineTree_->Branch("SuperCluster_phi", &SuperCluster_phi_);
+  offlineTree_->Branch("SuperCluster_nClusters", &SuperCluster_nClusters_);
+  offlineTree_->Branch("SuperCluster_isCandidate", &SuperCluster_isCandidate_);
   offlineTree_->Branch("HGCRecHit_dr", &RecHit_dr_);
   offlineTree_->Branch("HGCRecHit_eta", &RecHit_eta_);
   offlineTree_->Branch("HGCRecHit_phi", &RecHit_phi_);
@@ -448,6 +465,13 @@ void PhotonComparisonNtuplizer::resetOfflineVectors() {
   Trackster_Trackphi_.clear();
   Trackster_isSeed_.clear();
   Trackster_inCluster_.clear();
+  SuperCluster_energy_.clear();
+  SuperCluster_rawEnergy_.clear();
+  SuperCluster_eta_.clear();
+  SuperCluster_phi_.clear();
+  SuperCluster_dr_.clear();
+  SuperCluster_nClusters_.clear();
+  SuperCluster_isCandidate_.clear();
   RecHit_dr_.clear();
   RecHit_eta_.clear();
   RecHit_phi_.clear();
@@ -639,6 +663,11 @@ void PhotonComparisonNtuplizer::analyze(const edm::Event& iEvent, const edm::Eve
   requireValidHandle(layerClusterHandle, "LayerClusterSrc");
   const std::vector<reco::CaloCluster>* layerClusters = layerClusterHandle.product();
 
+  edm::Handle<std::vector<reco::SuperCluster>> superClusterHandle;
+  iEvent.getByToken(superClusterToken_, superClusterHandle);
+  requireValidHandle(superClusterHandle, "superClusterSrc");
+  const std::vector<reco::SuperCluster>* superClusters = superClusterHandle.product();
+
   std::vector<ticl::Trackster> onlineTracksters;
   {
     edm::Handle<std::vector<ticl::Trackster>> handle;
@@ -741,6 +770,36 @@ void PhotonComparisonNtuplizer::analyze(const edm::Event& iEvent, const edm::Eve
     const auto& seedHitsAndFractions = photonSeed->hitsAndFractions();
 
     resetOfflineVectors();
+
+    for (const auto& superCluster : *superClusters) {
+      const double superClusterDr = reco::deltaR(Pho_eta_, Pho_phi_, superCluster.eta(), superCluster.phi());
+      if (superClusterDr >= extRadius_) {
+        continue;
+      }
+
+      bool isCandidateSuperCluster = false;
+      if (superCluster.seed().isNonnull()) {
+        isCandidateSuperCluster = egammaTiming::haveCommonHit(superCluster.seed()->hitsAndFractions(), seedHitsAndFractions);
+      }
+      for (auto clusterIt = superCluster.clusters().begin();
+           clusterIt != superCluster.clusters().end() && !isCandidateSuperCluster;
+           ++clusterIt) {
+        for (const auto& photonCluster : photonClusters) {
+          if (egammaTiming::haveCommonHit((*clusterIt)->hitsAndFractions(), photonCluster->hitsAndFractions())) {
+            isCandidateSuperCluster = true;
+            break;
+          }
+        }
+      }
+
+      SuperCluster_dr_.push_back(superClusterDr);
+      SuperCluster_energy_.push_back(superCluster.energy());
+      SuperCluster_rawEnergy_.push_back(superCluster.rawEnergy());
+      SuperCluster_eta_.push_back(superCluster.eta());
+      SuperCluster_phi_.push_back(superCluster.phi());
+      SuperCluster_nClusters_.push_back(static_cast<int>(superCluster.clusters().size()));
+      SuperCluster_isCandidate_.push_back(isCandidateSuperCluster);
+    }
 
     int trackIndex = -1;
     for (reco::TrackCollection::const_iterator itrTr = trackHandle->begin(); itrTr != trackHandle->end(); ++itrTr) {
@@ -1126,6 +1185,7 @@ void PhotonComparisonNtuplizer::fillDescriptions(edm::ConfigurationDescriptions&
   desc.add<edm::InputTag>("vertexProducer", edm::InputTag("offlineSlimmedPrimaryVertices4D"));
   desc.add<edm::InputTag>("genParticles", edm::InputTag("prunedGenParticles"));
   desc.add<edm::InputTag>("tracksterSrc", edm::InputTag("ticlTrackstersMerge"));
+  desc.add<edm::InputTag>("superClusterSrc", edm::InputTag("particleFlowSuperClusterHGCal"));
   desc.add<edm::InputTag>("LayerClusterSrc", edm::InputTag("hgcalMergeLayerClusters"));
   desc.add<edm::InputTag>("RecHitsEE_Src", edm::InputTag("HGCalRecHit", "HGCEERecHits"));
   desc.add<edm::InputTag>("RecHitsFH_Src", edm::InputTag("HGCalRecHit", "HGCHEFRecHits"));
