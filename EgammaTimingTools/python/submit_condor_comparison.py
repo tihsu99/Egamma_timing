@@ -194,7 +194,9 @@ def build_production_commands(config, args, particle, region, sample, variant, i
   comparison_cfg = particle_cfg["ntuplizer_cfg"]
   online_label = particle_cfg["online_label"]
   online_candidate_label = variant_cfg.get("online_candidate_label", "hltEgammaCandidatesUnseeded::HLTX")
-  online_trackster_label = variant_cfg.get("online_trackster_label", "ticlTrackstersMerge::HLTX")
+  online_trackster_label = variant_cfg.get("online_trackster_label", "hltTiclCandidate::HLTX")
+  online_layer_cluster_label = variant_cfg.get("online_layer_cluster_label", "hltMergeLayerClusters::HLTX")
+  online_time_layer_cluster_label = variant_cfg.get("online_time_layer_cluster_label", "hltMergeLayerClusters:timeLayerCluster:HLTX")
   offline_trackster_label = variant_cfg.get("offline_trackster_label", "ticlTrackstersMerge::reRECO")
   propagate_hgcal_timing = int(bool(variant_cfg.get("propagate_hgcal_timing_to_origin", False)))
   comparison_input = workflow_cfg["ntuplizer_input"]
@@ -216,6 +218,8 @@ def build_production_commands(config, args, particle, region, sample, variant, i
       "online_label": online_label,
       "online_candidate_label": online_candidate_label,
       "online_trackster_label": online_trackster_label,
+      "online_layer_cluster_label": online_layer_cluster_label,
+      "online_time_layer_cluster_label": online_time_layer_cluster_label,
       "offline_trackster_label": offline_trackster_label,
       "propagate_hgcal_timing_to_origin": propagate_hgcal_timing,
       "comparison_input": comparison_input,
@@ -244,7 +248,8 @@ def build_production_commands(config, args, particle, region, sample, variant, i
   commands.append(
       "cmsRun {timing_dir}/python/{comparison_cfg} inputFiles={nt_input} outDir=$WORKDIR outFileNumber={file_index} "
       "{label_arg} offlineProcess=reRECO onlineLabel={online_label} onlineCandidateLabel={online_candidate_label} "
-      "onlineTracksterLabel={online_trackster_label} offlineTracksterLabel={offline_trackster_label} "
+      "onlineTracksterLabel={online_trackster_label} onlineLayerClusterLabel={online_layer_cluster_label} "
+      "onlineTimeLayerClusterLabel={online_time_layer_cluster_label} offlineTracksterLabel={offline_trackster_label} "
       "propagateHGCalTimingToOrigin={propagate_hgcal_timing_to_origin}".format(
           timing_dir=timing_dir,
           comparison_cfg=comparison_cfg,
@@ -254,6 +259,8 @@ def build_production_commands(config, args, particle, region, sample, variant, i
           online_label=online_label,
           online_candidate_label=online_candidate_label,
           online_trackster_label=online_trackster_label,
+          online_layer_cluster_label=online_layer_cluster_label,
+          online_time_layer_cluster_label=online_time_layer_cluster_label,
           offline_trackster_label=offline_trackster_label,
           propagate_hgcal_timing_to_origin=propagate_hgcal_timing,
       )
