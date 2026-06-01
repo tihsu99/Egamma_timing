@@ -20,6 +20,10 @@ def CheckDir(path):
   if not os.path.exists(path):
     os.system("mkdir -p {}".format(path))
 
+def require_nonempty(events, context):
+  if len(events) == 0:
+    raise RuntimeError("{} has no entries after selection".format(context))
+
 def Get_hist(bins, array, weight):
     hist_ = (
         hist.Hist.new
@@ -370,6 +374,7 @@ def produce_ntuple(config):
 
 
   events = events[events.Pho.pt > 10]
+  require_nonempty(events, "Input ntuple")
   threshold = config.threshold
   group = np.where(np.random.rand(len(events)) > threshold, 1, 0)
   train = np.where(np.random.rand(len(events)) > 0.5, 1, 0)
@@ -380,6 +385,16 @@ def produce_ntuple(config):
   PV    = events.PV
   seedTrackster = Trackster[(Trackster.pt > 1) & (Trackster.dr < 0.30) &  (Trackster.isSeed)]
   RecHit     = events.HGCRecHit
+
+  seed_counts = ak.num(seedTrackster.pt, axis=1)
+  missing_seed_count = int(ak.sum(seed_counts == 0))
+  if missing_seed_count:
+    raise RuntimeError(
+      "{} of {} selected photons have no seed trackster. TimeWrtSig cannot be produced safely; check tracksterSrc, LayerClusterSrc, and seed matching.".format(
+        missing_seed_count,
+        len(events),
+      )
+    )
 
 
   Trackster["seedTime"] = ak.broadcast_arrays(ak.fill_none(ak.mean(seedTrackster.Time, axis = 1), -99), Trackster.pt)[0]

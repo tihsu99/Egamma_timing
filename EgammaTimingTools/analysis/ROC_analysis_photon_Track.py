@@ -53,13 +53,12 @@ def draw_pt_vs_auc(inputs, time_str_list, prefix='TracksterIsolation_TimeWrtSig'
 
             print(key)
 
+            if hist2d_sig is None or hist2d_bkg is None:
+                raise KeyError("Missing 2D histogram for {}".format(key))
+
             pt_bins = np.array(hist2d_sig.axes[0].edges)
             isolation_bins = np.array(hist2d_sig.axes[1].edges)
             pt_bin_centers = 0.5 * (pt_bins[:-1] + pt_bins[1:])
-
-            if hist2d_sig is None or hist2d_bkg is None:
-                print(f"Missing histogram for {key}")
-                continue
 
             auc_values = []
             for i in range(len(pt_bins) - 1):
@@ -76,9 +75,14 @@ def draw_pt_vs_auc(inputs, time_str_list, prefix='TracksterIsolation_TimeWrtSig'
                 labels = np.concatenate([np.ones_like(x_vals), np.zeros_like(x_vals)])
                 weights = np.concatenate([proj_sig, proj_bkg])  # use bin counts as weights
 
+                if np.sum(proj_sig) == 0 or np.sum(proj_bkg) == 0:
+                    auc_values.append(np.nan)
+                    continue
                 auc_val = roc_auc_score(labels, scores, sample_weight=weights)
                 auc_values.append(auc_val)
 
+            if not np.any(np.isfinite(auc_values)):
+                raise RuntimeError("All pt-bin AUC values are empty for {}".format(key))
             plt.plot(pt_bin_centers, auc_values, linestyle=linestyle, label=f'{label} - TimeWrtSig {time_str}', linewidth = linewidth)
 
     plt.xlabel('Photon $p_T$ [GeV]')
@@ -92,7 +96,7 @@ def draw_pt_vs_auc(inputs, time_str_list, prefix='TracksterIsolation_TimeWrtSig'
     plt.show()
 
 
-def calculate_roc_auc(signal_histo, bkg_histo, signal_eff_threshold):
+def calculate_roc_auc(signal_histo, bkg_histo, signal_eff_threshold, histo_name=""):
     """
     Calculate the ROC curve, AUC, and background efficiency at a specified signal efficiency.
 
@@ -113,6 +117,15 @@ def calculate_roc_auc(signal_histo, bkg_histo, signal_eff_threshold):
     # Cumulative sums to calculate efficiencies
     sig_cumsum = np.cumsum(signal_hist)
     bkg_cumsum = np.cumsum(bkg_hist)
+
+    if len(sig_cumsum) == 0 or len(bkg_cumsum) == 0 or sig_cumsum[-1] <= 0 or bkg_cumsum[-1] <= 0:
+        raise RuntimeError(
+            "Cannot build ROC for '{}': signal sum = {}, background sum = {}. Check selections and timing scan inputs.".format(
+                histo_name,
+                sig_cumsum[-1] if len(sig_cumsum) else 0,
+                bkg_cumsum[-1] if len(bkg_cumsum) else 0,
+            )
+        )
 
     # Normalize to get efficiencies
     tpr = (sig_cumsum / sig_cumsum[-1])[::-1]  # Signal efficiency
@@ -196,9 +209,12 @@ def Draw_comparison(dataset_dict, histo_name, outputdir, fname, density = False,
     else:
       histogram = dataset_dict[dataset_][keyword][histo_name][second_keyword]
 
+    values, edges = histogram.to_numpy()
+    if np.sum(values) <= 0:
+      raise RuntimeError("Histogram '{}' for dataset '{}' is empty".format(histo_name, dataset_))
+
     histogram.plot1d(ax=ax, label = label, density = density, linewidth = linewidth)
 
-    values, edges = histogram.to_numpy()
     center = (edges[:-1] + edges[1:]) / 2
     data_dict[type_] = np.repeat(center, (values/np.sum(values) * 1000).astype(int))
 
@@ -390,6 +406,9 @@ class Accumulator(processor.ProcessorABC):
     else:
       events = events[(events['matchedToGenPho'] == 1)]
 
+    if len(events) == 0:
+      raise RuntimeError("Dataset '{}' has no entries after pt and truth selections".format(dataset))
+
     corr = self.corr['_noPU'] if '_noPU' in dataset else self.corr['']
     events["weight"] = corr(events.Pho.pt, events.Pho.eta) if not 'NonPrompt' in dataset else ak.ones_like(events.Pho.pt)
 
@@ -507,6 +526,9 @@ def analysis(region, config):
       else:
         events = events[(events['matchedToGenPho'] == 1)]
 
+      if len(events) == 0:
+        raise RuntimeError("{} has no entries after pt and truth selections".format(process_name))
+
       dists = (
         hist.Hist.new
         .Reg(100, 0, 200, name = "pt")
@@ -574,7 +596,7 @@ def analysis(region, config):
       Draw_comparison(output, variable_, store_path, variable_, density=False, logy = ("Isolation" in variable_))
     else:
       Draw_comparison(output, variable_, store_path, variable_, density=True, logy = ("Isolation" in variable_))
-    PU_data[variable_] = calculate_roc_auc(output['PromptPhoton']['Histogram'][variable_], output['NonPromptPhoton']['Histogram'][variable_], 0.95)
+    PU_data[variable_] = calculate_roc_auc(output['PromptPhoton']['Histogram'][variable_], output['NonPromptPhoton']['Histogram'][variable_], 0.95, variable_)
 
   time_cut_candidate = [0.04 * (i+1) for i in range(5)]
   target_variable = [['TracksterIsolation_TimeWrtSig', 'TracksterIsolation_ClusterCleaned_TimeWrtSig'], ['HGCIsolation_TimeWrtSig', 'HGCIsolation_ClusterCleaned_TimeWrtSig'], ['relTracksterIsolation_TimeWrtSig', 'relTracksterIsolation_ClusterCleaned_TimeWrtSig'], ['relHGCIsolation_TimeWrtSig', 'relHGCIsolation_ClusterCleaned_TimeWrtSig']]

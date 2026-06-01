@@ -21,6 +21,7 @@
 #include "FWCore/ServiceRegistry/interface/Service.h"
 #include "FWCore/Utilities/interface/ESGetToken.h"
 #include "FWCore/Utilities/interface/InputTag.h"
+#include "FWCore/Utilities/interface/Exception.h"
 #include "Geometry/CaloGeometry/interface/CaloGeometry.h"
 #include "Geometry/Records/interface/CaloGeometryRecord.h"
 #include "RecoEgamma/EgammaIsolationAlgos/interface/EgammaTrackSelector.h"
@@ -34,6 +35,17 @@
 #include <utility>
 #include <vector>
 #include <iterator>
+
+namespace {
+template <typename Handle>
+void requireValidHandle(const Handle& handle, const char* name) {
+  if (!handle.isValid()) {
+    throw cms::Exception("MissingProduct")
+        << "Required input product '" << name
+        << "' is missing. Check the configured InputTag and process name before running ntuple production.";
+  }
+}
+}  // namespace
 
 class ElectronComparisonNtuplizer : public edm::one::EDAnalyzer<edm::one::SharedResources> {
 public:
@@ -599,35 +611,50 @@ void ElectronComparisonNtuplizer::analyze(const edm::Event& iEvent, const edm::E
   const auto& mtdSigmat0 = iEvent.get(mtdSigmat0Token_);
   const auto& mtdTrkQualMVA = iEvent.get(mtdTrkQualMVAToken_);
 
+  requireValidHandle(electronHandle, "electronProducer");
+  requireValidHandle(onlineHandle, "onlineProducer");
+  requireValidHandle(onlineCandidateHandle, "onlineCandidateProducer");
+  requireValidHandle(vertexHandle, "vertexProducer");
+  requireValidHandle(trackHandle, "trackProducer");
+  if (isMC_) {
+    requireValidHandle(genParticles, "genParticles");
+  }
+  requireValidHandle(hitsEEHandle, "RecHitsEE_Src");
+  requireValidHandle(hitsFHHandle, "RecHitsFH_Src");
+  requireValidHandle(hitsBHHandle, "RecHitsBH_Src");
+  requireValidHandle(onlineHitsEEHandle, "onlineRecHitsEE_Src");
+  requireValidHandle(onlineHitsFHHandle, "onlineRecHitsFH_Src");
+  requireValidHandle(onlineHitsBHHandle, "onlineRecHitsBH_Src");
+
   std::vector<ticl::Trackster> tracksters;
   {
     edm::Handle<std::vector<ticl::Trackster>> handle;
     iEvent.getByToken(tracksterToken_, handle);
-    if (handle.isValid()) {
-      tracksters = *handle;
-    }
+    requireValidHandle(handle, "tracksterSrc");
+    tracksters = *handle;
   }
 
   edm::Handle<std::vector<reco::CaloCluster>> layerClusterHandle;
   iEvent.getByToken(layerClusterToken_, layerClusterHandle);
-  const std::vector<reco::CaloCluster>* layerClusters = layerClusterHandle.isValid() ? layerClusterHandle.product() : nullptr;
+  requireValidHandle(layerClusterHandle, "LayerClusterSrc");
+  const std::vector<reco::CaloCluster>* layerClusters = layerClusterHandle.product();
 
   std::vector<ticl::Trackster> onlineTracksters;
   {
     edm::Handle<std::vector<ticl::Trackster>> handle;
     iEvent.getByToken(onlineTracksterToken_, handle);
-    if (handle.isValid()) {
-      onlineTracksters = *handle;
-    }
+    requireValidHandle(handle, "onlineTracksterSrc");
+    onlineTracksters = *handle;
   }
 
   edm::Handle<std::vector<reco::CaloCluster>> onlineLayerClusterHandle;
   iEvent.getByToken(onlineLayerClusterToken_, onlineLayerClusterHandle);
-  const std::vector<reco::CaloCluster>* onlineLayerClusters =
-      onlineLayerClusterHandle.isValid() ? onlineLayerClusterHandle.product() : nullptr;
+  requireValidHandle(onlineLayerClusterHandle, "onlineLayerClusterSrc");
+  const std::vector<reco::CaloCluster>* onlineLayerClusters = onlineLayerClusterHandle.product();
 
   edm::Handle<edm::ValueMap<std::pair<float, float>>> onlineLayerClusterTimeHandle;
   iEvent.getByToken(onlineLayerClusterTimeToken_, onlineLayerClusterTimeHandle);
+  requireValidHandle(onlineLayerClusterTimeHandle, "onlineTimeLayerClusterSrc");
 
   const std::vector<reco::Vertex> vertices = *vertexHandle;
   reco::Vertex primaryVertex = egammaTiming::getPrimaryVertex(vertices, vtxN_);
@@ -781,8 +808,7 @@ void ElectronComparisonNtuplizer::analyze(const edm::Event& iEvent, const edm::E
       Track_dxy_.push_back(std::fabs(itrTr->dxy(beamPoint)));
     }
 
-    if (layerClusters != nullptr) {
-      for (const auto& trackster : tracksters) {
+    for (const auto& trackster : tracksters) {
         if (trackster.vertices().empty()) {
           continue;
         }
@@ -819,6 +845,11 @@ void ElectronComparisonNtuplizer::analyze(const edm::Event& iEvent, const edm::E
         bool isSeedTrackster = false;
         bool tracksterInCluster = false;
         for (const auto layerClusterId : trackster.vertices()) {
+          if (layerClusterId >= layerClusters->size()) {
+            throw cms::Exception("InvalidTracksterReference")
+                << "Trackster references layer cluster index " << layerClusterId
+                << " but LayerClusterSrc contains only " << layerClusters->size() << " entries.";
+          }
           if (isSeedTrackster && tracksterInCluster) {
             break;
           }
@@ -853,7 +884,6 @@ void ElectronComparisonNtuplizer::analyze(const edm::Event& iEvent, const edm::E
 
         Trackster_isSeed_.push_back(isSeedTrackster);
         Trackster_inCluster_.push_back(tracksterInCluster);
-      }
     }
 
     auto fillRecHit = [this, &seedHitsAndFractions, &electronClusters](const HGCRecHit& hit) {
@@ -927,7 +957,7 @@ void ElectronComparisonNtuplizer::analyze(const edm::Event& iEvent, const edm::E
     const trigger::EgammaObject* matchedObject = onlineObjectMatch.first >= 0 ? &onlineObjects[onlineObjectMatch.first] : nullptr;
     fillOnlineBranches(onlineCandidates[i], i, matchedObject, onlineObjectMatch.first, genMatch);
 
-    if (onlineLayerClusters != nullptr) {
+    {
       const auto& candidate = onlineCandidates[i];
       const reco::SuperClusterRef scRef = candidate.superCluster();
 
@@ -959,19 +989,14 @@ void ElectronComparisonNtuplizer::analyze(const edm::Event& iEvent, const edm::E
           online_LayerCluster_energy_.push_back(cluster.energy());
           online_LayerCluster_eta_.push_back(cluster.eta());
           online_LayerCluster_phi_.push_back(cluster.phi());
-          if (onlineLayerClusterTimeHandle.isValid()) {
-            edm::Ref<reco::CaloClusterCollection> clusterRef(onlineLayerClusterHandle, clusterIndex);
-            const auto timePair = (*onlineLayerClusterTimeHandle)[clusterRef];
-            const double clusterTime =
-                propagateHGCalTimingToOrigin_
-                    ? egammaTiming::timeAtOrigin(timePair.first, cluster.x(), cluster.y(), cluster.z())
-                    : timePair.first;
-            online_LayerCluster_Time_.push_back(clusterTime);
-            online_LayerCluster_TimeErr_.push_back(timePair.second);
-          } else {
-            online_LayerCluster_Time_.push_back(-99.);
-            online_LayerCluster_TimeErr_.push_back(-1.);
-          }
+          edm::Ref<reco::CaloClusterCollection> clusterRef(onlineLayerClusterHandle, clusterIndex);
+          const auto timePair = (*onlineLayerClusterTimeHandle)[clusterRef];
+          const double clusterTime =
+              propagateHGCalTimingToOrigin_
+                  ? egammaTiming::timeAtOrigin(timePair.first, cluster.x(), cluster.y(), cluster.z())
+                  : timePair.first;
+          online_LayerCluster_Time_.push_back(clusterTime);
+          online_LayerCluster_TimeErr_.push_back(timePair.second);
           online_LayerCluster_isSeed_.push_back(layerClusterIsSeed[clusterIndex]);
           online_LayerCluster_inCluster_.push_back(layerClusterInCluster[clusterIndex]);
         }
@@ -990,7 +1015,9 @@ void ElectronComparisonNtuplizer::analyze(const edm::Event& iEvent, const edm::E
           bool tracksterInCluster = false;
           for (const auto layerClusterId : trackster.vertices()) {
             if (layerClusterId >= layerClusterIsSeed.size()) {
-              continue;
+              throw cms::Exception("InvalidTracksterReference")
+                  << "Online trackster references layer cluster index " << layerClusterId
+                  << " but onlineLayerClusterSrc contains only " << layerClusterIsSeed.size() << " entries.";
             }
             isSeedTrackster = isSeedTrackster || layerClusterIsSeed[layerClusterId];
             tracksterInCluster = tracksterInCluster || layerClusterInCluster[layerClusterId];

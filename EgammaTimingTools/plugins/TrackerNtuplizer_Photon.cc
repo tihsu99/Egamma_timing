@@ -9,6 +9,7 @@
 #include "DataFormats/EgammaCandidates/interface/Photon.h"
 #include "DataFormats/PatCandidates/interface/Photon.h"
 #include "FWCore/Utilities/interface/EDGetToken.h"
+#include "FWCore/Utilities/interface/Exception.h"
 #include "DataFormats/GsfTrackReco/interface/GsfTrack.h"
 #include "DataFormats/TrackReco/interface/TrackFwd.h"
 #include "DataFormats/TrackReco/interface/Track.h"
@@ -30,6 +31,17 @@
 #include <Math/VectorUtil.h>
 #include <TTree.h>
 #include <TFile.h>
+
+namespace {
+template <typename Handle>
+void requireValidHandle(const Handle& handle, const char* name) {
+  if (!handle.isValid()) {
+    throw cms::Exception("MissingProduct")
+        << "Required input product '" << name
+        << "' is missing. Check the configured InputTag and process name before running ntuple production.";
+  }
+}
+}  // namespace
 
 enum PhotonMatchType{
   FAKE_PHOTON,
@@ -253,6 +265,16 @@ void TrackerNtuplizer_Photon::analyze(const edm::Event& iEvent, const edm::Event
   const edm::Handle<HGCRecHitCollection> hitsFH_Handle_ = iEvent.getHandle(hitsFH_);
   const edm::Handle<HGCRecHitCollection> hitsBH_Handle_ = iEvent.getHandle(hitsBH_);
 
+  requireValidHandle(photonHandle, "photonProducer");
+  requireValidHandle(vertexHandle, "vertexProducer");
+  requireValidHandle(trackHandle, "trackProducer");
+  if (isMC_) {
+    requireValidHandle(genParticles, "genParticles");
+  }
+  requireValidHandle(hitsEE_Handle_, "RecHitsEE_Src");
+  requireValidHandle(hitsFH_Handle_, "RecHitsFH_Src");
+  requireValidHandle(hitsBH_Handle_, "RecHitsBH_Src");
+
 
   std::vector <reco::Vertex> vertices = *vertexHandle;
   reco::Vertex pmVtx;
@@ -317,8 +339,8 @@ void TrackerNtuplizer_Photon::analyze(const edm::Event& iEvent, const edm::Event
 
 
 
-    PVTime_    = pmVtx.tError();
-    PVTimeErr_ = pmVtx.t();
+    PVTime_    = pmVtx.t();
+    PVTimeErr_ = pmVtx.tError();
 
     // Loop tracks
     Track_pt_.clear();
@@ -382,9 +404,11 @@ void TrackerNtuplizer_Photon::analyze(const edm::Event& iEvent, const edm::Event
     }
 
     iEvent.getByToken(tracksterToken_, trackstersH_);
+    requireValidHandle(trackstersH_, "tracksterSrc");
     const auto& tracksters = *trackstersH_;
    
     iEvent.getByToken(layer_cluster_Token_, layer_cluster_Handle_);
+    requireValidHandle(layer_cluster_Handle_, "LayerClusterSrc");
     const auto& layerClusters = *layer_cluster_Handle_.product();
 
     // Find signal tracksters
@@ -438,6 +462,11 @@ void TrackerNtuplizer_Photon::analyze(const edm::Event& iEvent, const edm::Event
       bool Trackster_inCluster = false;
 
       for (const auto lcId : tst.vertices()){
+        if (lcId >= layerClusters.size()) {
+          throw cms::Exception("InvalidTracksterReference")
+              << "Trackster references layer cluster index " << lcId
+              << " but LayerClusterSrc contains only " << layerClusters.size() << " entries.";
+        }
         if (isSeedTrackster && Trackster_inCluster) break;
         const std::vector<std::pair<DetId, float>>& hit_and_fractions = layerClusters[lcId].hitsAndFractions();
 
@@ -569,4 +598,3 @@ int TrackerNtuplizer_Photon::matchToTruth(reco::Photon const &ph, edm::View<reco
 }
 
 DEFINE_FWK_MODULE(TrackerNtuplizer_Photon);
-
