@@ -12,6 +12,7 @@ variants:
     proc_modifier: ""
     online_candidate_label: hltEgammaCandidatesUnseeded::HLTX
     online_trackster_label: ticlTrackstersMerge::HLTX
+    offline_trackster_label: ticlCandidate::reRECO
     propagate_hgcal_timing_to_origin: false
   v5:
     # TICL v5 stores HGCal timing at the detector; propagate it back to the
@@ -19,6 +20,7 @@ variants:
     proc_modifier: "--procModifiers ticl_v5"
     online_candidate_label: hltEgammaCandidatesUnseeded::HLTX
     online_trackster_label: ticlTrackstersMerge::HLTX
+    offline_trackster_label: ticlCandidate::reRECO
     propagate_hgcal_timing_to_origin: true
 
 particles:

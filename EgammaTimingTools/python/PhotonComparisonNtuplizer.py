@@ -20,6 +20,7 @@ options.register("offlineProcess", "reRECO", VarParsing.VarParsing.multiplicity.
 options.register("onlineLabel", "hltEgammaHLTExtra:Unseeded:HLT", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "Online EGammaObject collection")
 options.register("onlineCandidateLabel", "hltEgammaCandidatesUnseeded::HLTX", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "Online RecoEcalCandidate collection")
 options.register("onlineTracksterLabel", "ticlTrackstersMerge::HLTX", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "Online HLT trackster collection")
+options.register("offlineTracksterLabel", "", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "Offline trackster collection")
 options.register("propagateHGCalTimingToOrigin", 0, VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.int, "Propagate HGCal timing to the interaction origin")
 options.register("outDir", "", VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.string, "Output directory")
 options.register("outFileNumber", -1, VarParsing.VarParsing.multiplicity.singleton, VarParsing.VarParsing.varType.int, "Output file number")
@@ -53,6 +54,10 @@ if len(options.outDir):
   os.system("mkdir -p %s" % (options.outDir))
   out_file = "%s/%s" % (options.outDir, out_file)
 
+offline_trackster_label = options.offlineTracksterLabel
+if not len(offline_trackster_label):
+  offline_trackster_label = "ticlTrackstersMerge::%s" % (options.offlineProcess)
+
 process.TFileService = cms.Service("TFileService", fileName=cms.string(out_file))
 
 process.ntuplizer = cms.EDAnalyzer(
@@ -73,7 +78,7 @@ process.ntuplizer = cms.EDAnalyzer(
     BeamspotProducer=cms.InputTag("offlineBeamSpot", "", options.offlineProcess),
     vertexProducer=cms.InputTag("offlineSlimmedPrimaryVertices4D", "", options.offlineProcess),
     genParticles=cms.InputTag("prunedGenParticles"),
-    tracksterSrc=cms.InputTag("ticlTrackstersMerge", "", options.offlineProcess),
+    tracksterSrc=cms.InputTag(*offline_trackster_label.split(":")),
     LayerClusterSrc=cms.InputTag("hgcalMergeLayerClusters", "", options.offlineProcess),
     RecHitsEE_Src=cms.InputTag("HGCalRecHit", "HGCEERecHits", options.offlineProcess),
     RecHitsFH_Src=cms.InputTag("HGCalRecHit", "HGCHEFRecHits", options.offlineProcess),
