@@ -53,19 +53,25 @@ def parquet_sources(iso_dir, particle, region, scenario, process_name):
   raise RuntimeError("No parquet sources found for scenario={} process={}".format(scenario, process_name))
 
 
-def load_frame(iso_dir, particle, region, scenario, process_name):
+def apply_min_pt(frame, min_pt):
+  if min_pt is None or min_pt <= 0.0 or "eg-pt" not in frame.columns:
+    return frame
+  return frame[frame["eg-pt"] >= min_pt].copy()
+
+
+def load_frame(iso_dir, particle, region, scenario, process_name, min_pt):
   sources = parquet_sources(iso_dir, particle, region, scenario, process_name)
   print("[load] {} parquet file(s) for scenario={} process={}".format(len(sources), scenario, process_name))
   if len(sources) == 1:
-    return pd.read_parquet(sources[0])
-  return pd.concat((pd.read_parquet(source) for source in sources), ignore_index=True, copy=False)
+    return apply_min_pt(pd.read_parquet(sources[0]), min_pt)
+  return apply_min_pt(pd.concat((pd.read_parquet(source) for source in sources), ignore_index=True, copy=False), min_pt)
 
 
-def load_scenario_frames(iso_dir, particle, region, scenario, signal_process, background_process):
+def load_scenario_frames(iso_dir, particle, region, scenario, signal_process, background_process, min_pt):
   print("[summary] scenario={}".format(scenario))
-  sig_df = load_frame(iso_dir, particle, region, scenario, signal_process)
-  bkg_df = load_frame(iso_dir, particle, region, scenario, background_process)
-  return scenario, apply_reweighting(sig_df, bkg_df)
+  sig_df = load_frame(iso_dir, particle, region, scenario, signal_process, min_pt)
+  bkg_df = load_frame(iso_dir, particle, region, scenario, background_process, min_pt)
+  return scenario, apply_reweighting(sig_df, bkg_df, min_pt)
 
 
 def compute_weights(sig_df, bkg_df, pt_bins, eta_bins):
@@ -78,8 +84,9 @@ def compute_weights(sig_df, bkg_df, pt_bins, eta_bins):
   return weights_2d[pt_idx, eta_idx]
 
 
-def apply_reweighting(sig_df, bkg_df):
-  pt_bins = np.linspace(15, 200, 20)
+def apply_reweighting(sig_df, bkg_df, min_pt):
+  pt_low = max(15.0, min_pt if min_pt is not None else 15.0)
+  pt_bins = np.linspace(pt_low, 200, 20)
   eta_bins = np.linspace(-3.2, 3.2, 33)
   sig_df = sig_df.copy()
   bkg_df = bkg_df.copy()
@@ -274,11 +281,28 @@ def read_parquet_columns(source, columns):
   return pd.read_parquet(source, columns=columns)
 
 
-def column_quantile_range(sources, column, max_values=200000):
+def column_values_with_min_pt(source, column, min_pt):
+  columns = [column]
+  if min_pt is not None and min_pt > 0.0:
+    columns.append("eg-pt")
+  df = read_parquet_columns(source, columns)
+  if df.empty or column not in df.columns:
+    return np.asarray([], dtype=float)
+  values = df[column].to_numpy()
+  mask = np.isfinite(values)
+  if min_pt is not None and min_pt > 0.0:
+    if "eg-pt" not in df.columns:
+      return np.asarray([], dtype=float)
+    pt_values = df["eg-pt"].to_numpy()
+    mask = mask & np.isfinite(pt_values) & (pt_values >= min_pt)
+  return values[mask]
+
+
+def column_quantile_range(sources, column, min_pt, max_values=200000):
   samples = []
   total = 0
   for source in sources:
-    values = read_parquet_column(source, column)
+    values = column_values_with_min_pt(source, column, min_pt)
     if values.size == 0:
       continue
     if total + values.size > max_values:
@@ -304,10 +328,10 @@ def column_quantile_range(sources, column, max_values=200000):
   return 0.0, high
 
 
-def column_max(sources, column):
+def column_max(sources, column, min_pt):
   high = None
   for source in sources:
-    values = read_parquet_column(source, column)
+    values = column_values_with_min_pt(source, column, min_pt)
     if values.size == 0:
       continue
     source_high = float(np.max(values))
@@ -318,11 +342,11 @@ def column_max(sources, column):
   return high
 
 
-def histogram_column_sources(sources, column, bins):
+def histogram_column_sources(sources, column, bins, min_pt):
   counts = np.zeros(len(bins) - 1, dtype=float)
   n_values = 0
   for source in sources:
-    values = read_parquet_column(source, column)
+    values = column_values_with_min_pt(source, column, min_pt)
     if values.size == 0:
       continue
     hist, _ = np.histogram(values, bins=bins)
@@ -359,20 +383,21 @@ def plot_isolation_distribution_from_parquet(
     reference_name,
     tag,
     plotdir,
+    min_pt,
 ):
   sig_sources = parquet_sources(iso_dir, particle, region, scenario, signal_process)
   bkg_sources = parquet_sources(iso_dir, particle, region, scenario, background_process)
   if not parquet_has_column(sig_sources, variable) or not parquet_has_column(bkg_sources, variable):
     return
 
-  sig_range = column_quantile_range(sig_sources, variable)
-  bkg_range = column_quantile_range(bkg_sources, variable)
+  sig_range = column_quantile_range(sig_sources, variable, min_pt)
+  bkg_range = column_quantile_range(bkg_sources, variable, min_pt)
   if sig_range is None or bkg_range is None:
     return
   high = max(sig_range[1], bkg_range[1])
   bins = np.linspace(0.0, high, 80)
-  sig_counts, sig_entries = histogram_column_sources(sig_sources, variable, bins)
-  bkg_counts, bkg_entries = histogram_column_sources(bkg_sources, variable, bins)
+  sig_counts, sig_entries = histogram_column_sources(sig_sources, variable, bins, min_pt)
+  bkg_counts, bkg_entries = histogram_column_sources(bkg_sources, variable, bins, min_pt)
   if sig_entries == 0 or bkg_entries == 0:
     return
 
@@ -394,7 +419,7 @@ def plot_isolation_distribution_from_parquet(
   print("[plot] {}".format(out_name))
 
 
-def accumulate_pt_eta_hist(sources, pt_bins, eta_bins):
+def accumulate_pt_eta_hist(sources, pt_bins, eta_bins, min_pt):
   counts = np.zeros((len(pt_bins) - 1, len(eta_bins) - 1), dtype=float)
   for source in sources:
     df = read_parquet_columns(source, ["eg-pt", "eg-eta"])
@@ -403,6 +428,8 @@ def accumulate_pt_eta_hist(sources, pt_bins, eta_bins):
     pt_values = df["eg-pt"].to_numpy()
     eta_values = df["eg-eta"].to_numpy()
     mask = np.isfinite(pt_values) & np.isfinite(eta_values)
+    if min_pt is not None and min_pt > 0.0:
+      mask = mask & (pt_values >= min_pt)
     if not np.any(mask):
       continue
     hist, _, _ = np.histogram2d(pt_values[mask], eta_values[mask], bins=[pt_bins, eta_bins])
@@ -410,11 +437,12 @@ def accumulate_pt_eta_hist(sources, pt_bins, eta_bins):
   return counts
 
 
-def streaming_weight_map(sig_sources, bkg_sources):
-  pt_bins = np.linspace(15, 200, 20)
+def streaming_weight_map(sig_sources, bkg_sources, min_pt):
+  pt_low = max(15.0, min_pt if min_pt is not None else 15.0)
+  pt_bins = np.linspace(pt_low, 200, 20)
   eta_bins = np.linspace(-3.2, 3.2, 33)
-  sig_hist = accumulate_pt_eta_hist(sig_sources, pt_bins, eta_bins)
-  bkg_hist = accumulate_pt_eta_hist(bkg_sources, pt_bins, eta_bins)
+  sig_hist = accumulate_pt_eta_hist(sig_sources, pt_bins, eta_bins, min_pt)
+  bkg_hist = accumulate_pt_eta_hist(bkg_sources, pt_bins, eta_bins, min_pt)
   weights_2d = np.divide(bkg_hist, sig_hist, out=np.zeros_like(bkg_hist), where=sig_hist > 0)
   return weights_2d, pt_bins, eta_bins
 
@@ -425,18 +453,25 @@ def lookup_streaming_weights(pt_values, eta_values, weights_2d, pt_bins, eta_bin
   return weights_2d[pt_idx, eta_idx]
 
 
-def weighted_score_histogram(sources, column, bins, weight_context=None):
+def weighted_score_histogram(sources, column, bins, weight_context=None, min_pt=None):
   counts = np.zeros(len(bins) - 1, dtype=float)
   n_values = 0
   for source in sources:
     columns = [column]
     if weight_context is not None:
       columns += ["eg-pt", "eg-eta"]
+    elif min_pt is not None and min_pt > 0.0:
+      columns.append("eg-pt")
     df = read_parquet_columns(source, columns)
     if df.empty or column not in df.columns:
       continue
     values = df[column].to_numpy()
     mask = np.isfinite(values) & (values > 0.0)
+    if min_pt is not None and min_pt > 0.0:
+      if "eg-pt" not in df.columns:
+        continue
+      pt_values_for_cut = df["eg-pt"].to_numpy()
+      mask = mask & np.isfinite(pt_values_for_cut) & (pt_values_for_cut >= min_pt)
     weights = None
     if weight_context is not None:
       weights_2d, pt_bins, eta_bins = weight_context
@@ -463,7 +498,7 @@ def binned_roc(sig_counts, bkg_counts):
   return fpr, tpr, auc(fpr, tpr)
 
 
-def streaming_contexts(iso_dir, particle, region, scenarios, signal_process, background_process):
+def streaming_contexts(iso_dir, particle, region, scenarios, signal_process, background_process, min_pt):
   contexts = {}
   for scenario in scenarios:
     sig_sources = parquet_sources(iso_dir, particle, region, scenario, signal_process)
@@ -478,8 +513,9 @@ def streaming_contexts(iso_dir, particle, region, scenarios, signal_process, bac
     contexts[scenario] = {
         "sig_sources": sig_sources,
         "bkg_sources": bkg_sources,
-        "weight_context": streaming_weight_map(sig_sources, bkg_sources),
+        "weight_context": streaming_weight_map(sig_sources, bkg_sources, min_pt),
         "records_cache": {},
+        "min_pt": min_pt,
     }
   return contexts
 
@@ -494,14 +530,25 @@ def streaming_candidate_columns(context, collection_name, veto_mode, reference_n
 
 def streaming_roc_record(context, column, roc_bins):
   high = max(
-      column_max(context["sig_sources"], column) or 0.0,
-      column_max(context["bkg_sources"], column) or 0.0,
+      column_max(context["sig_sources"], column, context["min_pt"]) or 0.0,
+      column_max(context["bkg_sources"], column, context["min_pt"]) or 0.0,
   )
   if high <= 0.0:
     return None
   bins = np.linspace(0.0, high, roc_bins + 1)
-  sig_counts, sig_entries = weighted_score_histogram(context["sig_sources"], column, bins, context["weight_context"])
-  bkg_counts, bkg_entries = weighted_score_histogram(context["bkg_sources"], column, bins)
+  sig_counts, sig_entries = weighted_score_histogram(
+      context["sig_sources"],
+      column,
+      bins,
+      context["weight_context"],
+      context["min_pt"],
+  )
+  bkg_counts, bkg_entries = weighted_score_histogram(
+      context["bkg_sources"],
+      column,
+      bins,
+      min_pt=context["min_pt"],
+  )
   if sig_entries == 0 or bkg_entries == 0:
     return None
   roc = binned_roc(sig_counts, bkg_counts)
@@ -662,6 +709,7 @@ def plot_isolation_distributions_for_family_streaming(
           reference_name,
           f"best_dt_{best['dt']:.3f}",
           plotdir,
+          context["min_pt"],
       )
     if default is not None and (best is None or default["column"] != best["column"]):
       plot_isolation_distribution_from_parquet(
@@ -677,11 +725,12 @@ def plot_isolation_distributions_for_family_streaming(
           reference_name,
           "no_cut",
           plotdir,
+          context["min_pt"],
       )
 
 
 def run_streaming_roc_summary(args, scenarios):
-  contexts = streaming_contexts(args.isoDir, args.particle, args.region, scenarios, args.signal, args.background)
+  contexts = streaming_contexts(args.isoDir, args.particle, args.region, scenarios, args.signal, args.background, args.min_pt)
   summary = {}
   iso_distribution_args = (args.isoDir, args.particle, args.region, args.signal, args.background)
 
@@ -824,6 +873,7 @@ def plot_isolation_distributions_for_family(
     region,
     signal_process,
     background_process,
+    min_pt,
 ):
   for scenario, (sig_df, bkg_df) in frames.items():
     records = scenario_records(sig_df, bkg_df, collection_name, veto_mode, reference_name)
@@ -843,6 +893,7 @@ def plot_isolation_distributions_for_family(
           reference_name,
           f"best_dt_{best['dt']:.3f}",
           plotdir,
+          min_pt,
       )
     if default is not None and (best is None or default["column"] != best["column"]):
       plot_isolation_distribution_from_parquet(
@@ -858,6 +909,7 @@ def plot_isolation_distributions_for_family(
           reference_name,
           "no_cut",
           plotdir,
+          min_pt,
       )
 
 
@@ -895,6 +947,7 @@ def plot_histogram_only_iso_distributions(
     scenarios,
     plotdir,
     dt_values,
+    min_pt,
 ):
   tasks = histogram_family_tasks(scenarios)
   task_iter = tasks
@@ -917,6 +970,7 @@ def plot_histogram_only_iso_distributions(
           reference_name,
           tag,
           plotdir,
+          min_pt,
       )
 
 
@@ -1269,6 +1323,7 @@ def main():
   parser.add_argument("--histogram-only", action="store_true", help="Only make streaming isolation histograms from parquet columns")
   parser.add_argument("--histogram-roc", action="store_true", help="Use streaming high-granularity histograms for ROC/AUC")
   parser.add_argument("--roc-bins", default=2000, type=int, help="Number of score bins for --histogram-roc")
+  parser.add_argument("--min-pt", default=30.0, type=float, help="Minimum eg-pt in GeV for summary plots")
   parser.add_argument(
       "--iso-distribution-dt",
       action="append",
@@ -1276,6 +1331,9 @@ def main():
       help="Timing cut value to use for histogram-only isolation plots. Defaults to 9999.0.",
   )
   args = parser.parse_args()
+
+  if args.min_pt < 0.0:
+    raise RuntimeError("--min-pt must be non-negative")
 
   if not args.skip_timing and not args.histogram_only and not args.mergedDir and not args.mergedFile:
     if not args.signal_merged_file or not args.background_merged_file:
@@ -1296,6 +1354,7 @@ def main():
         scenarios,
         args.plotDir,
         iso_distribution_dt,
+        args.min_pt,
     )
     return
 
@@ -1326,12 +1385,29 @@ def main():
     if tqdm is not None:
       scenario_iter = tqdm(scenarios, desc="Loading scenarios", unit="scenario")
     for scenario in scenario_iter:
-      key, frame = load_scenario_frames(args.isoDir, args.particle, args.region, scenario, args.signal, args.background)
+      key, frame = load_scenario_frames(
+          args.isoDir,
+          args.particle,
+          args.region,
+          scenario,
+          args.signal,
+          args.background,
+          args.min_pt,
+      )
       frames[key] = frame
   else:
     with ThreadPoolExecutor(max_workers=args.n_workers) as executor:
       futures = {
-          executor.submit(load_scenario_frames, args.isoDir, args.particle, args.region, scenario, args.signal, args.background): scenario
+          executor.submit(
+              load_scenario_frames,
+              args.isoDir,
+              args.particle,
+              args.region,
+              scenario,
+              args.signal,
+              args.background,
+              args.min_pt,
+          ): scenario
           for scenario in scenarios
       }
       future_iter = as_completed(futures)
@@ -1342,7 +1418,7 @@ def main():
         frames[key] = frame
 
   summary = {}
-  iso_distribution_args = (args.isoDir, args.particle, args.region, args.signal, args.background)
+  iso_distribution_args = (args.isoDir, args.particle, args.region, args.signal, args.background, args.min_pt)
   roc_tasks = [(collection_name, veto_mode) for collection_name in ["trackster", "HGCRecHit"] for veto_mode in ["cone", "seed", "cluster"]]
   roc_iter = roc_tasks
   if tqdm is not None:
