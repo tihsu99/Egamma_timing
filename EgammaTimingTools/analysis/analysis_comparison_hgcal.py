@@ -558,22 +558,26 @@ def write_empty_part(part_dir, process_name):
 
 
 def write_process_file_batch(batch_index, files, scenario_configs, particle, process_name, is_signal):
-  frames = {scenario: [] for scenario in scenario_configs}
+  event_chunks = {scenario: [] for scenario in scenario_configs}
   for file_name in files:
     with uproot.open(file_name) as root_file:
       for scenario, config in scenario_configs.items():
         chunk = read_tree_from_file(root_file, file_name, scenario, config["branches"])
-        events = ak.Array(chunk)
-        df = build_dataframe(events, scenario, particle, process_name, is_signal)
-        if not df.empty:
-          frames[scenario].append(df)
+        event_chunks[scenario].append(ak.Array(chunk))
 
   results = {}
-  for scenario, scenario_frames in frames.items():
-    if not scenario_frames:
+  for scenario, scenario_chunks in event_chunks.items():
+    if not scenario_chunks:
       results[scenario] = (0, 0)
       continue
-    df = pd.concat(scenario_frames, ignore_index=True, copy=False)
+    if len(scenario_chunks) == 1:
+      events = scenario_chunks[0]
+    else:
+      events = ak.concatenate(scenario_chunks, axis=0)
+    df = build_dataframe(events, scenario, particle, process_name, is_signal)
+    if df.empty:
+      results[scenario] = (0, 0)
+      continue
     out_path = os.path.join(
         scenario_configs[scenario]["part_dir"],
         f"{process_name}_iso.batch{batch_index:04d}.parquet",
