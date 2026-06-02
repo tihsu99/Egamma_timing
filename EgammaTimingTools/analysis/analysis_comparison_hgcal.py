@@ -75,6 +75,11 @@ def tree_sources(files, tree_name):
   return [f"{name}:{tree_name}" for name in files]
 
 
+def chunked(items, size):
+  for start in range(0, len(items), size):
+    yield start // size, items[start:start + size]
+
+
 def tree_branch_names(file_name, tree_name):
   with uproot.open(file_name) as root_file:
     if tree_name not in root_file:
@@ -144,6 +149,25 @@ def iterate_tree(files, tree_name, branches, step_size):
         tree_sources(files, tree_name),
         expressions=branches,
         step_size=step_size,
+        library="ak",
+        how=dict,
+    )
+  except ValueError as exc:
+    message = str(exc)
+    if "entries in normal baskets" in message and "don't add up to expected number of entries" in message:
+      raise RuntimeError(
+          "The input ROOT file looks inconsistent for uproot reading, likely from `hadd` over uproot-written jagged TTrees. "
+          "Use the original merged file directory instead of the hadd output, or pass non-hadded per-process files."
+      ) from exc
+    raise
+
+
+def read_tree_from_file(root_file, file_name, tree_name, branches):
+  if tree_name not in root_file:
+    raise KeyError("Unable to find tree '{}' in {}".format(tree_name, file_name))
+  try:
+    return root_file[tree_name].arrays(
+        expressions=branches,
         library="ak",
         how=dict,
     )
@@ -512,6 +536,133 @@ def write_scenario_parquet(input_dir, input_file, out_dir, particle, region, sce
   return part_dir
 
 
+def prepare_scenario_configs(out_dir, particle, region, scenarios, process_name, files):
+  configs = {}
+  for scenario in scenarios:
+    scenario_dir = os.path.join(out_dir, particle, region, scenario)
+    check_dir(scenario_dir)
+    part_dir = clear_existing_parquet_parts(scenario_dir, process_name)
+    branches = scenario_branch_names(scenario, particle)
+    branches = filter_available_branches(files, scenario, branches, optional_branch_names(scenario))
+    configs[scenario] = {
+        "part_dir": part_dir,
+        "branches": branches,
+    }
+  return configs
+
+
+def write_empty_part(part_dir, process_name):
+  out_path = os.path.join(part_dir, f"{process_name}_iso.part0000.parquet")
+  pd.DataFrame(columns=["process", "is_signal", "weight", "scenario"]).to_parquet(out_path, index=False)
+  print("[saved] {} entries=0".format(out_path))
+
+
+def write_process_file_batch(batch_index, files, scenario_configs, particle, process_name, is_signal):
+  frames = {scenario: [] for scenario in scenario_configs}
+  for file_name in files:
+    with uproot.open(file_name) as root_file:
+      for scenario, config in scenario_configs.items():
+        chunk = read_tree_from_file(root_file, file_name, scenario, config["branches"])
+        events = ak.Array(chunk)
+        df = build_dataframe(events, scenario, particle, process_name, is_signal)
+        if not df.empty:
+          frames[scenario].append(df)
+
+  results = {}
+  for scenario, scenario_frames in frames.items():
+    if not scenario_frames:
+      results[scenario] = (0, 0)
+      continue
+    df = pd.concat(scenario_frames, ignore_index=True, copy=False)
+    out_path = os.path.join(
+        scenario_configs[scenario]["part_dir"],
+        f"{process_name}_iso.batch{batch_index:04d}.parquet",
+    )
+    df.to_parquet(out_path, index=False)
+    results[scenario] = (1, len(df))
+    print("[saved] {} entries={}".format(out_path, len(df)))
+  return results
+
+
+def write_process_parquets_file_batches(
+    input_dir,
+    input_file,
+    out_dir,
+    particle,
+    region,
+    scenarios,
+    process_name,
+    is_signal,
+    file_batch_size,
+    n_workers,
+):
+  files = resolve_input_files(input_dir, input_file, particle, region, process_name)
+  if not files:
+    raise RuntimeError("No ROOT files found for process {}".format(process_name))
+
+  scenario_configs = prepare_scenario_configs(out_dir, particle, region, scenarios, process_name, files)
+  batches = list(chunked(files, file_batch_size))
+  print(
+      "[build] process={} signal={} files={} file_batch_size={} batches={}".format(
+          process_name,
+          is_signal,
+          len(files),
+          file_batch_size,
+          len(batches),
+      )
+  )
+
+  totals = {scenario: {"parts": 0, "entries": 0} for scenario in scenarios}
+  if n_workers <= 1:
+    batch_iter = batches
+    if tqdm is not None:
+      batch_iter = tqdm(batches, desc="{} file batches".format(process_name), unit="batch")
+    for batch_index, batch_files in batch_iter:
+      results = write_process_file_batch(batch_index, batch_files, scenario_configs, particle, process_name, is_signal)
+      for scenario, (n_parts, n_entries) in results.items():
+        totals[scenario]["parts"] += n_parts
+        totals[scenario]["entries"] += n_entries
+  else:
+    with ThreadPoolExecutor(max_workers=n_workers) as executor:
+      futures = {
+          executor.submit(
+              write_process_file_batch,
+              batch_index,
+              batch_files,
+              scenario_configs,
+              particle,
+              process_name,
+              is_signal,
+          ): batch_index
+          for batch_index, batch_files in batches
+      }
+      future_iter = as_completed(futures)
+      if tqdm is not None:
+        future_iter = tqdm(future_iter, total=len(futures), desc="{} file batches".format(process_name), unit="batch")
+      for future in future_iter:
+        batch_index = futures[future]
+        try:
+          results = future.result()
+        except Exception as exc:
+          raise RuntimeError("Failed while processing process={} batch={}".format(process_name, batch_index)) from exc
+        for scenario, (n_parts, n_entries) in results.items():
+          totals[scenario]["parts"] += n_parts
+          totals[scenario]["entries"] += n_entries
+
+  for scenario, total in totals.items():
+    if total["parts"] == 0:
+      write_empty_part(scenario_configs[scenario]["part_dir"], process_name)
+      total["parts"] = 1
+    print(
+        "[done] scenario={} process={} parts={} total_entries={}".format(
+            scenario,
+            process_name,
+            total["parts"],
+            total["entries"],
+        )
+    )
+
+
 def main():
   parser = argparse.ArgumentParser(description="Build HGCal timing/isolation parquet tables from merged comparison ntuples")
   parser.add_argument("--inputDir", type=str, help="Merged ROOT base directory")
@@ -526,6 +677,12 @@ def main():
   parser.add_argument("--scenario", action="append", choices=SCENARIOS, help="Optional scenario filter")
   parser.add_argument("--n-workers", default=1, type=int)
   parser.add_argument("--step-size", default="40 MB", type=str, help="uproot iterate step size")
+  parser.add_argument(
+      "--file-batch-size",
+      default=0,
+      type=int,
+      help="Process small ROOT inputs in file batches. Use 0 to keep the standard uproot iterate workflow.",
+  )
   args = parser.parse_args()
 
   if not args.inputDir and not args.inputFile:
@@ -535,6 +692,36 @@ def main():
   scenarios = args.scenario if args.scenario else SCENARIOS
   signal_file = args.signal_file if args.signal_file else args.inputFile
   background_file = args.background_file if args.background_file else args.inputFile
+
+  if args.file_batch_size < 0:
+    raise RuntimeError("--file-batch-size must be non-negative")
+
+  if args.file_batch_size > 0:
+    write_process_parquets_file_batches(
+        args.inputDir,
+        signal_file,
+        args.outDir,
+        args.particle,
+        args.region,
+        scenarios,
+        args.signal,
+        True,
+        args.file_batch_size,
+        args.n_workers,
+    )
+    write_process_parquets_file_batches(
+        args.inputDir,
+        background_file,
+        args.outDir,
+        args.particle,
+        args.region,
+        scenarios,
+        args.background,
+        False,
+        args.file_batch_size,
+        args.n_workers,
+    )
+    return
 
   tasks = []
   for scenario in scenarios:
