@@ -30,8 +30,8 @@ The comparison pipeline does four things:
 The production step should be run inside a CMSSW area.
 
 ```bash
-cmsrel CMSSW_14_0_0
-cd CMSSW_14_0_0/src
+cmsrel CMSSW_15_1_0_pre6
+cd CMSSW_15_1_0_pre6/src
 cmsenv
 git clone https://github.com/tihsu99/Egamma_timing.git
 scram b -j 8
@@ -96,7 +96,7 @@ python3 submit_condor_comparison.py \
   --region endcap
 ```
 
-Useful filters:
+Useful filters: (Note that `max-events` > 60 will likely cause the job to exceed the 2 GB memory limit on Condor, normally `workday` or `tomorrow` is a safer option for large jobs)
 
 - `--particle electron` or `--particle photon`
 - `--region endcap`
