@@ -10,6 +10,8 @@ import numpy as np
 import pandas as pd
 import uproot
 
+from comparison_settings import timing_cuts
+
 try:
   from tqdm import tqdm
 except ImportError:
@@ -21,7 +23,7 @@ COMMON_SCENARIOS = {"online_v4", "online_v5", "offline_v4", "offline_v5"}
 ONLINE_SCENARIOS = {"online_v4", "online_v5"}
 OFFLINE_SCENARIOS = {"offline_v4", "offline_v5"}
 
-DT_CUTS = [round(0.01 * (index + 1), 3) for index in range(20)] + [9999.0]
+DT_CUTS = timing_cuts()
 VETO_MODES = ["cone", "seed", "cluster"]
 COLLECTIONS = [
     ("HGCRecHit", "energy", 1.0),

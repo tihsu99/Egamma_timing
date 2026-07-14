@@ -201,6 +201,15 @@ This produces ROC curves, AUC scans, and timing distributions for:
 - `offline_v4`
 - `offline_v5`
 
+The isolation scan settings are shared by the parquet builder and plotter in
+`EgammaTimingTools/analysis/comparison_settings.py`. By default, timing cuts run
+from 0.01 to 0.50 ns in 0.01 ns steps, with 9999 representing no timing cut.
+The summary also plots background efficiency versus timing cut at 90% and 95%
+signal efficiency; the no-timing-cut result is shown as a horizontal line.
+
+Rebuild the parquet tables after changing the timing-cut scan. Existing parquet
+files only contain the cut columns that were configured when they were created.
+
 ## Minimal end-to-end example
 
 ```bash

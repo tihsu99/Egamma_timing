@@ -13,6 +13,8 @@ import pandas as pd
 import uproot
 from sklearn.metrics import auc, roc_curve
 
+from comparison_settings import MAX_TIME_CUT, NO_TIME_CUT, PLOT_HLT_DEFAULT, SIGNAL_EFFICIENCIES
+
 try:
   import pyarrow.parquet as pq
 except ImportError:
@@ -29,7 +31,6 @@ ONLINE_SCENARIOS = {"online_v4", "online_v5"}
 OFFLINE_SCENARIOS = {"offline_v4", "offline_v5"}
 COMMON_REFERENCES = ["seed"]
 OFFLINE_ONLY_REFERENCES = ["pv", "sigTrk"]
-DT_CUTS = [round(0.01 * (index + 1), 3) for index in range(20)] + [9999.0]
 COLLECTION_LABELS = {
     "trackster": "Trackster",
     "HGCRecHit": "HGCRecHit",
@@ -107,8 +108,8 @@ def compute_roc(sig_df, bkg_df, variable):
   bkg_vals = bkg_df[variable].to_numpy()
   sig_weights = sig_df["weight"].to_numpy()
   bkg_weights = bkg_df["weight"].to_numpy()
-  sig_mask = np.isfinite(sig_vals) & np.isfinite(sig_weights) & (sig_vals > 0.0)
-  bkg_mask = np.isfinite(bkg_vals) & np.isfinite(bkg_weights) & (bkg_vals > 0.0)
+  sig_mask = np.isfinite(sig_vals) & np.isfinite(sig_weights) & (sig_vals >= 0.0)
+  bkg_mask = np.isfinite(bkg_vals) & np.isfinite(bkg_weights) & (bkg_vals >= 0.0)
   sig_vals = sig_vals[sig_mask]
   bkg_vals = bkg_vals[bkg_mask]
   sig_weights = sig_weights[sig_mask]
@@ -167,9 +168,77 @@ def best_record(records):
 
 def default_record(records):
   for record in records:
-    if abs(record["dt"] - 9999.0) < 1e-6:
+    if abs(record["dt"] - NO_TIME_CUT) < 1e-6:
       return record
   return None
+
+
+def background_efficiency_at_signal_efficiency(record, signal_efficiency):
+  tpr = np.asarray(record["tpr"])
+  fpr = np.asarray(record["fpr"])
+  valid = np.isfinite(tpr) & np.isfinite(fpr)
+  tpr = tpr[valid]
+  fpr = fpr[valid]
+  if tpr.size == 0 or signal_efficiency < np.min(tpr) or signal_efficiency > np.max(tpr):
+    return None
+  unique_tpr, first_indices = np.unique(tpr, return_index=True)
+  return float(np.interp(signal_efficiency, unique_tpr, fpr[first_indices]))
+
+
+def plot_background_efficiency_scans(records_by_scenario, collection_name, veto_mode, reference_name, plotdir):
+  colors = plt.get_cmap("tab10").colors
+  for signal_efficiency in SIGNAL_EFFICIENCIES:
+    plt.figure(figsize=(8, 6))
+    drew = False
+    max_dt = 0.0
+    for index, scenario in enumerate(SCENARIOS):
+      records = records_by_scenario.get(scenario, [])
+      scan_records = [record for record in records if record["dt"] <= MAX_TIME_CUT]
+      points = [
+          (record["dt"], background_efficiency_at_signal_efficiency(record, signal_efficiency))
+          for record in scan_records
+      ]
+      points = [(dt, efficiency) for dt, efficiency in points if efficiency is not None]
+      if not points:
+        continue
+      color = colors[index % len(colors)]
+      dts, efficiencies = zip(*points)
+      plt.plot(dts, efficiencies, color=color, marker="o", markersize=3, linewidth=2, label=scenario)
+      max_dt = max(max_dt, max(dts))
+      no_time_cut = default_record(records)
+      if no_time_cut is not None:
+        baseline = background_efficiency_at_signal_efficiency(no_time_cut, signal_efficiency)
+        if baseline is not None:
+          plt.axhline(
+              baseline,
+              color=color,
+              linestyle="--",
+              linewidth=1.5,
+              label=f"{scenario} no time cut",
+          )
+      drew = True
+
+    if not drew:
+      plt.close()
+      continue
+    plt.xlim(0.0, max_dt)
+    plt.xlabel(r"$|\Delta t|$ cut [ns]")
+    plt.ylabel("Background efficiency")
+    plt.title(
+        f"Background efficiency at {signal_efficiency:.0%} signal efficiency: "
+        f"{COLLECTION_LABELS[collection_name]} {veto_mode} veto ({reference_name})"
+    )
+    plt.grid(alpha=0.3)
+    plt.legend(fontsize=8, ncol=2)
+    plt.tight_layout()
+    efficiency_tag = int(round(100 * signal_efficiency))
+    out_name = (
+        f"background_efficiency_at_sig{efficiency_tag}_"
+        f"{collection_name}_{veto_mode}_ref_{reference_name}.png"
+    )
+    plt.savefig(os.path.join(plotdir, out_name))
+    plt.savefig(os.path.join(plotdir, out_name.replace(".png", ".pdf")))
+    plt.close()
 
 
 def plot_roc_by_scenario(frames, collection_name, veto_mode, reference_name, plotdir, include_default_online=False):
@@ -203,7 +272,7 @@ def plot_roc_by_scenario(frames, collection_name, veto_mode, reference_name, plo
     if default is not None:
       plt.plot(default["tpr"], 1.0 - default["fpr"], color=color, linewidth=1.5, linestyle="--", label=f"{scenario} no cut")
 
-    if include_default_online and scenario in ONLINE_SCENARIOS:
+    if PLOT_HLT_DEFAULT and include_default_online and scenario in ONLINE_SCENARIOS:
       branch = default_hlt_branch(frames[scenario][0])
       if branch is not None and branch in frames[scenario][1].columns:
         roc = compute_roc(frames[scenario][0], frames[scenario][1], branch)
@@ -227,12 +296,14 @@ def plot_roc_by_scenario(frames, collection_name, veto_mode, reference_name, plo
 def plot_auc_scan(frames, collection_name, veto_mode, reference_name, plotdir):
   plt.figure(figsize=(8, 6))
   drew = False
+  records_by_scenario = {}
   for scenario in SCENARIOS:
     if scenario not in frames:
       continue
     sig_df, bkg_df = frames[scenario]
     records = scenario_records(sig_df, bkg_df, collection_name, veto_mode, reference_name)
-    filtered = [record for record in records if record["dt"] < 9998.0]
+    records_by_scenario[scenario] = records
+    filtered = [record for record in records if record["dt"] <= MAX_TIME_CUT]
     if not filtered:
       continue
     dts = [record["dt"] for record in filtered]
@@ -252,6 +323,13 @@ def plot_auc_scan(frames, collection_name, veto_mode, reference_name, plotdir):
   plt.savefig(os.path.join(plotdir, out_name))
   plt.savefig(os.path.join(plotdir, out_name.replace(".png", ".pdf")))
   plt.close()
+  plot_background_efficiency_scans(
+      records_by_scenario,
+      collection_name,
+      veto_mode,
+      reference_name,
+      plotdir,
+  )
 
 
 def parquet_schema_names(source):
@@ -466,7 +544,7 @@ def weighted_score_histogram(sources, column, bins, weight_context=None, min_pt=
     if df.empty or column not in df.columns:
       continue
     values = df[column].to_numpy()
-    mask = np.isfinite(values) & (values > 0.0)
+    mask = np.isfinite(values) & (values >= 0.0)
     if min_pt is not None and min_pt > 0.0:
       if "eg-pt" not in df.columns:
         continue
@@ -628,7 +706,7 @@ def plot_roc_by_scenario_streaming(contexts, collection_name, veto_mode, referen
     if default is not None:
       plt.plot(default["tpr"], 1.0 - default["fpr"], color=color, linewidth=1.5, linestyle="--", label=f"{scenario} no cut")
 
-    if include_default_online and scenario in ONLINE_SCENARIOS:
+    if PLOT_HLT_DEFAULT and include_default_online and scenario in ONLINE_SCENARIOS:
       branch = streaming_default_hlt_branch(contexts[scenario])
       if branch is not None:
         roc = streaming_roc_record(contexts[scenario], branch, roc_bins)
@@ -652,11 +730,13 @@ def plot_roc_by_scenario_streaming(contexts, collection_name, veto_mode, referen
 def plot_auc_scan_streaming(contexts, collection_name, veto_mode, reference_name, plotdir, roc_bins):
   plt.figure(figsize=(8, 6))
   drew = False
+  records_by_scenario = {}
   for scenario in SCENARIOS:
     if scenario not in contexts:
       continue
     records = cached_streaming_scenario_records(contexts[scenario], collection_name, veto_mode, reference_name, roc_bins)
-    filtered = [record for record in records if record["dt"] < 9998.0]
+    records_by_scenario[scenario] = records
+    filtered = [record for record in records if record["dt"] <= MAX_TIME_CUT]
     if not filtered:
       continue
     dts = [record["dt"] for record in filtered]
@@ -676,6 +756,13 @@ def plot_auc_scan_streaming(contexts, collection_name, veto_mode, reference_name
   plt.savefig(os.path.join(plotdir, out_name))
   plt.savefig(os.path.join(plotdir, out_name.replace(".png", ".pdf")))
   plt.close()
+  plot_background_efficiency_scans(
+      records_by_scenario,
+      collection_name,
+      veto_mode,
+      reference_name,
+      plotdir,
+  )
 
 
 def plot_isolation_distributions_for_family_streaming(
